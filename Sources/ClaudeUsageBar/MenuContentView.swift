@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuContentView: View {
     @ObservedObject var monitor: UsageMonitor
+    @State private var launchAtLoginEnabled = LaunchAtLogin.isEnabled
 
     var body: some View {
         VStack(spacing: 0) {
@@ -227,6 +228,29 @@ struct MenuContentView: View {
                 .foregroundStyle(.secondary)
                 Spacer()
                 segmentedIntervalPicker
+            }
+
+            HStack(spacing: 8) {
+                Label {
+                    Text("로그인 시 시작")
+                        .font(.system(size: 11, weight: .medium))
+                } icon: {
+                    Image(systemName: "power.circle")
+                        .font(.system(size: 10))
+                }
+                .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("", isOn: $launchAtLoginEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                    .onChange(of: launchAtLoginEnabled) { _, newValue in
+                        let success = LaunchAtLogin.setEnabled(newValue)
+                        if !success {
+                            // 등록 실패 시 실제 상태로 되돌림
+                            launchAtLoginEnabled = LaunchAtLogin.isEnabled
+                        }
+                    }
             }
 
             HStack(spacing: 0) {

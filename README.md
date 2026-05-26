@@ -106,8 +106,72 @@ quota 값이 `null`인 항목(해당 사용자 플랜에 없는 quota)은 표시
 | 자주 rebuild 후 다이얼로그 다시 뜸 | ad-hoc 서명 사용 중 (해시 변동) | Apple Development 인증서 보유 시 자동 해결 / Keychain Access.app에서 ACL 수동 추가 |
 | `HTTP 401` | OAuth 토큰 만료 | Claude Desktop 열어서 자동 갱신 트리거 |
 | `HTTP 429` | Rate-limit | 갱신 주기를 늘리세요 (60분 권장) |
-| 앱 2개가 실행되는데 메뉴바엔 안 보임 | macOS 26.0.x SwiftUI MenuBarExtra 회귀 의심 / App Translocation | `killall -9 ClaudeUsageBar` 후 `.app`을 `/Applications/`로 옮기고 `xattr -dr com.apple.quarantine ClaudeUsageBar.app` 후 재실행. 안 되면 26.1+로 OS 업데이트 |
+| 앱 2개가 실행되는데 메뉴바엔 안 보임 | macOS 26.0.x SwiftUI MenuBarExtra 회귀 의심 / App Translocation | 아래 [Clean Install](#clean-install) 절차 진행 |
 | Gatekeeper "확인되지 않은 개발자" | dev cert 미보유 → ad-hoc 서명 | Finder에서 우클릭 → 열기 (한 번만), 이후엔 무음 동작 |
+
+### Clean Install
+
+이전 버전을 시도했다가 좀비 프로세스 / LaunchServices 캐시 / 잘못된 위치의 `.app` 등 잔재가 남아서 안 풀리는 경우, 이 절차로 깨끗하게 다시 시작합니다.
+
+```bash
+# 1. 좀비 프로세스 종료
+killall -9 ClaudeUsageBar 2>/dev/null
+
+# 2. 이전 잔재 정리
+rm -rf ~/Downloads/ClaudeUsageBar.app /Applications/ClaudeUsageBar.app 2>/dev/null
+rm -rf ~/ClaudeUsageBar /Users/Shared/Source/ClaudeUsageBar 2>/dev/null
+
+# 3. LaunchServices 캐시 리프레시 (구버전 등록 정보 제거)
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -kill -seed -r -domain local -domain system -domain user
+
+# 4. 깨끗하게 다시 빌드
+cd ~/   # 또는 원하는 경로
+git clone https://github.com/CLT-fefire/ClaudeUsageBar.git
+cd ClaudeUsageBar
+./make_app.sh
+
+# 5. 안정 위치(/Applications/)로 이동 + 실행
+mv ClaudeUsageBar.app /Applications/
+open /Applications/ClaudeUsageBar.app
+```
+
+메뉴바에 `%` 숫자가 나타나면 클릭 → Keychain 다이얼로그 → **항상 허용** + 로그인 비밀번호 (1회).
+
+### 진단 명령
+
+Clean Install 후에도 안 되면 아래 출력을 메인테이너에게 전달해주세요. 5분이면 끝납니다.
+
+```bash
+echo "=== OS 버전 ==="
+sw_vers
+
+echo "=== 실행 중인 프로세스 ==="
+ps -ef | grep ClaudeUsageBar | grep -v grep
+
+echo "=== 코드 서명 상태 ==="
+codesign -dv --verbose=2 /Applications/ClaudeUsageBar.app 2>&1 | head -15
+
+echo "=== quarantine 마크 ==="
+xattr -l /Applications/ClaudeUsageBar.app
+
+echo "=== 최근 크래시 로그 ==="
+ls -lt ~/Library/Logs/DiagnosticReports/ClaudeUsageBar-*.ips 2>/dev/null | head -3
+
+echo "=== 시스템 로그 (최근 5분) ==="
+log show --predicate 'process == "ClaudeUsageBar" OR senderImagePath CONTAINS "ClaudeUsageBar"' \
+    --last 5m --info 2>&1 | tail -50
+```
+
+#### macOS 버전 확인 권장
+
+macOS 26.0.x에서 SwiftUI MenuBarExtra 회귀 버그가 의심되는 사례가 있습니다. 26.1+로 업데이트하면 해결될 가능성이 있어요.
+
+```bash
+softwareupdate --list   # 사용 가능한 업데이트 확인
+```
+
+26.1 이상이 보이면 시스템 설정 → 일반 → 소프트웨어 업데이트에서 적용.
 
 ## 자동 실행 설정
 

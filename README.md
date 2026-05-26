@@ -35,26 +35,30 @@ GET https://api.anthropic.com/api/oauth/usage
 
 ## 설치
 
-### 방법 A: Release 바이너리 다운로드 (간편)
-
-1. [Releases](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest) 에서 `ClaudeUsageBar.app.zip` 다운로드
-2. 압축 해제 → `ClaudeUsageBar.app`을 `/Applications/`로 이동
-3. **첫 실행**: Finder에서 우클릭 → **열기** → Gatekeeper 경고에 "열기" 확인
-   - 또는 터미널: `xattr -dr com.apple.quarantine /Applications/ClaudeUsageBar.app`
-4. 메뉴바 아이콘 클릭 → Keychain 다이얼로그에서 **"항상 허용"** + 로그인 비밀번호
-
-### 방법 B: 소스에서 빌드 (권장 — 보안 검증 가능)
+본 프로젝트는 **소스 빌드 배포 정책**을 따릅니다. 사전 빌드된 바이너리는 배포하지 않습니다 — 각자 자기 머신에서 빌드해서 (있으면) 자기 dev cert로 서명하는 게 가장 깨끗한 신뢰 체인을 만들어주기 때문입니다 ([상세 이유](#왜-바이너리-zip을-안-주나)).
 
 ```bash
 git clone https://github.com/CLT-fefire/ClaudeUsageBar.git
 cd ClaudeUsageBar
 ./make_app.sh
 open ClaudeUsageBar.app
+# 또는 /Applications/로 이동해서 영구 설치:
+# mv ClaudeUsageBar.app /Applications/
 ```
 
-요구사항: Xcode 17+ (Swift 6.2 포함) + macOS 26 Tahoe
+요구사항:
+- macOS 26.0 Tahoe 이상
+- Xcode 17+ (Command Line Tools 포함, Swift 6.2)
+- Claude Desktop 또는 `claude` CLI 로그인 상태 (Keychain에 자격증명 있어야 함)
 
 빌드 시 본인의 Apple Development 인증서가 있으면 자동 감지해서 안정 서명에 사용 (Keychain ACL이 rebuild에도 유지됨). 없으면 ad-hoc 서명으로 fallback.
+
+### 왜 바이너리 zip을 안 주나?
+
+1. **개인 cert가 public 릴리스에 박힘** — 메인테이너 dev cert로 서명한 zip은 Dear U team ID 등 신원이 그대로 노출됨
+2. **다운로드 zip은 Gatekeeper 경고를 어차피 거쳐야 함** — "다운로드 즉시 실행"이라는 장점이 사실상 무력
+3. **각자 빌드가 신뢰 사슬이 더 깔끔** — 자기 cert로 서명한 자기 머신 바이너리 → 본인이 빌드 시점에 코드 감사한 그대로의 상태가 보장됨
+4. **Keychain ACL이 자기 환경에 귀속** — rebuild에도 안정 (메인테이너가 cert를 바꿔도 영향 없음)
 
 ## 첫 실행 시 권한 부여
 
@@ -102,7 +106,8 @@ quota 값이 `null`인 항목(해당 사용자 플랜에 없는 quota)은 표시
 | 자주 rebuild 후 다이얼로그 다시 뜸 | ad-hoc 서명 사용 중 (해시 변동) | Apple Development 인증서 보유 시 자동 해결 / Keychain Access.app에서 ACL 수동 추가 |
 | `HTTP 401` | OAuth 토큰 만료 | Claude Desktop 열어서 자동 갱신 트리거 |
 | `HTTP 429` | Rate-limit | 갱신 주기를 늘리세요 (60분 권장) |
-| Gatekeeper "악성 코드일 수 있음" | 다운로드 quarantine 마크 | `xattr -dr com.apple.quarantine ClaudeUsageBar.app` |
+| 앱 2개가 실행되는데 메뉴바엔 안 보임 | macOS 26.0.x SwiftUI MenuBarExtra 회귀 의심 / App Translocation | `killall -9 ClaudeUsageBar` 후 `.app`을 `/Applications/`로 옮기고 `xattr -dr com.apple.quarantine ClaudeUsageBar.app` 후 재실행. 안 되면 26.1+로 OS 업데이트 |
+| Gatekeeper "확인되지 않은 개발자" | dev cert 미보유 → ad-hoc 서명 | Finder에서 우클릭 → 열기 (한 번만), 이후엔 무음 동작 |
 
 ## 자동 실행 설정
 

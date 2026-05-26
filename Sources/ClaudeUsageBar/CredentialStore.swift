@@ -82,4 +82,48 @@ struct CredentialStore {
             organizationUuid: json["organizationUuid"] as? String
         )
     }
+
+    /// 갱신된 토큰을 Keychain에 다시 써넣는다.
+    ///
+    /// Anthropic OAuth는 refresh 시 refresh token도 회전(rotation)시키므로,
+    /// 우리가 갱신했으면 반드시 write-back 해야 Keychain의 refresh token이
+    /// 최신으로 유지된다. 그러지 않으면 Claude Code/Desktop 본체가 옛
+    /// refresh token으로 갱신을 시도하다 로그인이 깨질 수 있다.
+    ///
+    /// 기존 항목 전체 JSON을 읽어 토큰 3개 필드만 교체하고 나머지(scopes,
+    /// subscriptionType, rateLimitTier 등)는 그대로 보존한다.
+    static func save(accessToken: String, refreshToken: String, expiresAt: Date) throws {
+        let readQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: AnyObject?
+        let status = SecItemCopyMatching(readQuery as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data else {
+            throw LoadError.keychainError(status)
+        }
+        guard var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var oauth = json["claudeAiOauth"] as? [String: Any] else {
+            throw LoadError.parseError("write-back: 기존 JSON 파싱 실패")
+        }
+
+        oauth["accessToken"] = accessToken
+        oauth["refreshToken"] = refreshToken
+        // expiresAt은 epoch milliseconds (Claude Code가 쓰는 형식과 동일)
+        oauth["expiresAt"] = Int((expiresAt.timeIntervalSince1970 * 1000).rounded())
+        json["claudeAiOauth"] = oauth
+
+        let newData = try JSONSerialization.data(withJSONObject: json)
+        let matchQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName
+        ]
+        let attributes: [String: Any] = [kSecValueData as String: newData]
+        let updateStatus = SecItemUpdate(matchQuery as CFDictionary, attributes as CFDictionary)
+        guard updateStatus == errSecSuccess else {
+            throw LoadError.keychainError(updateStatus)
+        }
+    }
 }

@@ -17,7 +17,8 @@ claude.ai 웹에서 보는 4가지 quota — **현재 세션(5h) / 주간 전체
 
 ```
 macOS Keychain ("Claude Code-credentials")
-    │ OAuth access_token 읽기 (read-only)
+    │ OAuth access_token 읽기
+    │ ↕ 만료 시 refresh_token으로 자동 갱신 후 write-back
     ▼
 GET https://api.anthropic.com/api/oauth/usage
     │ Bearer <token>
@@ -28,7 +29,8 @@ GET https://api.anthropic.com/api/oauth/usage
 메뉴바 % + 4개 progress bar
 ```
 
-- **자격증명**: Claude Desktop 또는 `claude` CLI가 로그인 시 Keychain에 저장해둔 OAuth 토큰을 그대로 활용 (본 앱은 **읽기만**, 갱신은 Claude 본체가 자동 처리)
+- **자격증명**: Claude Desktop 또는 `claude` CLI가 로그인 시 Keychain에 저장해둔 OAuth 토큰을 그대로 활용
+- **토큰 자동 갱신**: access token이 만료(임박)되거나 401이 떨어지면, Keychain의 `refresh_token`으로 Claude Code/Desktop과 **동일한 방식**으로 새 토큰을 직접 발급받아 Keychain에 다시 써넣습니다. 덕분에 Claude 본체를 열지 않아도 만료 때마다 재로그인할 필요가 없습니다 (refresh token 회전까지 반영하므로 Claude 본체 로그인과도 정합성 유지). refresh token 자체가 만료된 드문 경우에만 재로그인 안내를 띄웁니다.
 - **데이터 소스**: claude.ai 웹이 호출하는 동일한 OAuth API → 웹에서 보는 값과 100% 일치
 - **갱신 주기**: 5분 / 15분 / 30분 / 60분 중 선택 (기본 60분, Anthropic rate-limit 보호)
 - **외부 의존성**: Foundation + SwiftUI + Security framework만 사용
@@ -70,6 +72,8 @@ open ClaudeUsageBar.app
 
 → **"항상 허용"** 선택 + 로그인 비밀번호 입력 = 그 후로는 무음 동작.
 
+> 토큰을 처음 자동 갱신할 때 macOS가 같은 항목에 대해 **수정** 권한을 한 번 더 물어볼 수 있습니다. 여기서도 **"항상 허용"** 을 선택하면 이후 갱신은 무음으로 진행됩니다.
+
 ## 표시되는 Quota
 
 | 항목 | API 키 | 의미 |
@@ -87,15 +91,17 @@ quota 값이 `null`인 항목(해당 사용자 플랜에 없는 quota)은 표시
 
 | 무엇 | 어떻게 |
 |---|---|
-| Keychain의 `Claude Code-credentials` 항목 1개 | macOS Keychain ACL (사용자가 "항상 허용" 명시적 승인) |
-| `api.anthropic.com` 1개 URL | HTTPS GET 호출 |
+| Keychain의 `Claude Code-credentials` 항목 1개 | 읽기 + (토큰 갱신 시) 쓰기. macOS Keychain ACL로 사용자가 "항상 허용" 명시적 승인 |
+| `api.anthropic.com` (usage 조회) | HTTPS GET |
+| `console.anthropic.com` (토큰 갱신) | HTTPS POST — Keychain의 refresh token만 전송, Claude Code/Desktop이 쓰는 것과 동일 엔드포인트 |
 | **외부 서버, 텔레메트리, 자동 업데이트** | **없음** |
 
-- 토큰은 본인 머신에서 나가지 않습니다 (Anthropic 본체로만 전송).
+- 토큰은 본인 머신에서 Anthropic 본체로만 나갑니다 (제3자 서버 경유 없음).
+- Keychain 쓰기는 갱신된 토큰을 도로 저장하는 용도뿐이며, Claude Code/Desktop이 만든 항목 구조를 그대로 보존합니다(토큰 3개 필드만 교체).
 - 권한 범위는 Claude Desktop/CLI가 이미 가지고 있는 것과 동일 (새로 권한이 생기지 않음).
 - 본 코드는 MIT 라이선스로 공개되어 누구든 감사 가능.
 
-권한이 의심스러우면 `Sources/ClaudeUsageBar/CredentialStore.swift` (Keychain 읽기) 와 `ClaudeUsageProbe.swift` (API 호출) 두 파일만 보면 전체가 다 들어있습니다.
+권한이 의심스러우면 `Sources/ClaudeUsageBar/CredentialStore.swift` (Keychain 읽기/쓰기), `OAuthRefresher.swift` (토큰 갱신), `ClaudeUsageProbe.swift` (API 호출) 세 파일만 보면 전체가 다 들어있습니다.
 
 ## 트러블슈팅
 
@@ -104,7 +110,8 @@ quota 값이 `null`인 항목(해당 사용자 플랜에 없는 quota)은 표시
 | `Keychain 항목을 찾을 수 없습니다` | Claude Desktop/CLI 미로그인 | `claude` 실행 후 로그인 또는 Claude Desktop 로그인 |
 | 매 실행마다 Keychain 다이얼로그 | "허용"만 누름 (1회용) | "항상 허용" 선택 |
 | 자주 rebuild 후 다이얼로그 다시 뜸 | ad-hoc 서명 사용 중 (해시 변동) | Apple Development 인증서 보유 시 자동 해결 / Keychain Access.app에서 ACL 수동 추가 |
-| `HTTP 401` | OAuth 토큰 만료 | Claude Desktop 열어서 자동 갱신 트리거 |
+| `HTTP 401` | access token 만료 | 앱이 refresh token으로 자동 갱신·재시도 (보통 사용자 조치 불필요) |
+| `자동 갱신하지 못했습니다 ... 재로그인` | refresh token까지 만료 | `claude /login` 또는 Claude Desktop 재로그인 |
 | `HTTP 429` | Rate-limit | 갱신 주기를 늘리세요 (60분 권장) |
 | 앱 2개가 실행되는데 메뉴바엔 안 보임 | macOS 26.0.x SwiftUI MenuBarExtra 회귀 의심 / App Translocation | 아래 [Clean Install](#clean-install) 절차 진행 |
 | Gatekeeper "확인되지 않은 개발자" | dev cert 미보유 → ad-hoc 서명 | Finder에서 우클릭 → 열기 (한 번만), 이후엔 무음 동작 |
@@ -185,8 +192,9 @@ softwareupdate --list   # 사용 가능한 업데이트 확인
 ClaudeUsageBar/
 ├── Sources/ClaudeUsageBar/
 │   ├── ClaudeUsageBarApp.swift   # @main + MenuBarExtra 진입점
-│   ├── CredentialStore.swift     # Keychain 읽기 (Security framework)
-│   ├── ClaudeUsageProbe.swift    # /api/oauth/usage HTTP 호출 + 파싱
+│   ├── CredentialStore.swift     # Keychain 읽기/쓰기 (Security framework)
+│   ├── OAuthRefresher.swift      # refresh_token으로 토큰 자동 갱신
+│   ├── ClaudeUsageProbe.swift    # /api/oauth/usage HTTP 호출 + 파싱 + 갱신 연계
 │   ├── UsageMonitor.swift        # 폴링 타이머 + 상태 (ObservableObject)
 │   └── MenuContentView.swift     # 메뉴 UI (Liquid Glass cards)
 ├── Resources/AppIcon.icns        # 앱 아이콘 (% 글리프 squircle)

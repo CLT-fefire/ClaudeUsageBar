@@ -55,7 +55,8 @@ struct ClaudeUsageProbe {
 
     enum ProbeError: Error, LocalizedError {
         case credentials(CredentialStore.LoadError)
-        case tokenExpired(Date)
+        case unauthorized                 // 401 — 내부 신호 (갱신 후 재시도 트리거용)
+        case reauthRequired               // 자동 갱신도 실패 → 사용자 재로그인 필요
         case http(status: Int, body: String?)
         case network(Error)
         case parse(String)
@@ -64,8 +65,10 @@ struct ClaudeUsageProbe {
         var errorDescription: String? {
             switch self {
             case .credentials(let err): return err.localizedDescription
-            case .tokenExpired(let when):
-                return "OAuth 토큰이 \(when.formatted())에 만료되었습니다. Claude Desktop을 열어 자동 갱신하거나, 'claude /login'으로 재로그인하세요."
+            case .unauthorized:
+                return "인증 실패 (401)."
+            case .reauthRequired:
+                return "OAuth 토큰을 자동 갱신하지 못했습니다. Claude Desktop을 열거나 'claude /login'으로 재로그인하세요."
             case .http(let status, let body):
                 let detail = body?.prefix(200) ?? ""
                 return "HTTP \(status): \(detail)"
@@ -84,18 +87,70 @@ struct ClaudeUsageProbe {
         self.session = session
     }
 
+    /// 만료 임박으로 판단하는 여유 시간. access token이 이 시간 내에 죽으면
+    /// 선제적으로 갱신해서 폴링 도중 401을 맞는 일을 줄인다.
+    private static let expiryBuffer: TimeInterval = 60
+
     func probe() async throws -> Snapshot {
-        let creds: CredentialStore.Credentials
+        var creds = try loadCredentials()
+
+        // 1) 만료됐거나 임박했으면 호출 전에 미리 갱신
+        if let exp = creds.expiresAt, exp.timeIntervalSinceNow < Self.expiryBuffer {
+            creds = try await refreshCredentials(using: creds)
+        }
+
+        // 2) usage 조회. access token이 예상보다 일찍 죽어 401이 나면 1회 갱신 후 재시도.
         do {
-            creds = try CredentialStore.load()
+            return try await fetchUsage(using: creds)
+        } catch ProbeError.unauthorized {
+            let refreshed = try await refreshCredentials(using: creds)
+            return try await fetchUsage(using: refreshed)
+        }
+    }
+
+    private func loadCredentials() throws -> CredentialStore.Credentials {
+        do {
+            return try CredentialStore.load()
         } catch let err as CredentialStore.LoadError {
             throw ProbeError.credentials(err)
         }
+    }
 
-        if let exp = creds.expiresAt, exp < Date() {
-            throw ProbeError.tokenExpired(exp)
+    /// refreshToken으로 새 토큰을 발급받아 Keychain에 write-back 하고,
+    /// 메모리상의 자격증명도 갱신해서 돌려준다.
+    private func refreshCredentials(
+        using creds: CredentialStore.Credentials
+    ) async throws -> CredentialStore.Credentials {
+        let result: OAuthRefresher.Result
+        do {
+            result = try await OAuthRefresher.refresh(refreshToken: creds.refreshToken, session: session)
+        } catch OAuthRefresher.RefreshError.invalidGrant,
+                OAuthRefresher.RefreshError.noRefreshToken {
+            // 토큰으로 회복 불가 → 사용자 재로그인만이 답
+            throw ProbeError.reauthRequired
+        } catch let err as OAuthRefresher.RefreshError {
+            // 일시적 실패(네트워크/5xx 등)는 다음 폴링에서 재시도
+            throw ProbeError.network(err)
         }
 
+        // 회전된 refresh token 정합성 유지를 위해 Keychain에 즉시 반영.
+        // write-back 자체가 실패해도(권한 등) 이번 폴링은 메모리 토큰으로 진행.
+        try? CredentialStore.save(
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            expiresAt: result.expiresAt
+        )
+
+        return CredentialStore.Credentials(
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            expiresAt: result.expiresAt,
+            subscriptionType: creds.subscriptionType,
+            organizationUuid: creds.organizationUuid
+        )
+    }
+
+    private func fetchUsage(using creds: CredentialStore.Credentials) async throws -> Snapshot {
         var request = URLRequest(url: Self.usageURL)
         request.httpMethod = "GET"
         request.setValue("Bearer \(creds.accessToken)", forHTTPHeaderField: "Authorization")
@@ -118,7 +173,7 @@ struct ClaudeUsageProbe {
         case 200:
             break
         case 401:
-            throw ProbeError.tokenExpired(Date())
+            throw ProbeError.unauthorized
         case 429:
             let retryAt = Self.parseRetryAfter(http.value(forHTTPHeaderField: "Retry-After"))
             throw ProbeError.rateLimited(retryAfter: retryAt)

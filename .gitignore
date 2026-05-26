@@ -14,6 +14,9 @@ DerivedData/
 *.app/
 *.app.zip
 
+# Icon generator temp output (AppIcon.icns 자체는 Resources/에 commit됨)
+*.iconset/
+
 # Xcode
 *.pbxuser
 !default.pbxuser

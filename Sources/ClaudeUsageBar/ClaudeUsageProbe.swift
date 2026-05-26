@@ -158,20 +158,16 @@ struct ClaudeUsageProbe {
         )
     }
 
-    private static let isoFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let isoFormatterNoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
+    /// ISO8601DateFormatter는 Sendable이 아니라서 static let 캐시는 strict concurrency에서 금지.
+    /// 호출 빈도가 낮으니(폴링당 5~6회) 매번 새로 만들어도 비용 무시 가능.
     private static func isoDate(_ s: String) -> Date? {
-        isoFormatter.date(from: s) ?? isoFormatterNoFrac.date(from: s)
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFrac.date(from: s) { return d }
+
+        let noFrac = ISO8601DateFormatter()
+        noFrac.formatOptions = [.withInternetDateTime]
+        return noFrac.date(from: s)
     }
 
     private static func parseRetryAfter(_ header: String?) -> Date {

@@ -35,7 +35,10 @@ final class UsageMonitor: ObservableObject {
         }
     }
 
-    deinit { timer?.invalidate() }
+    // 의도적으로 deinit 없음. UsageMonitor는 앱 라이프타임 @StateObject로
+    // 앱 종료 시까지 살아있으므로 Timer 정리가 불필요하다. Swift 6 strict
+    // concurrency에선 nonisolated deinit에서 MainActor-isolated Timer 접근이
+    // 금지라 deinit을 두면 컴파일 에러 발생.
 
     var statusBarText: String {
         if isProbing && snapshot == nil { return "…" }

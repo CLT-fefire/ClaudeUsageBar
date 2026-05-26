@@ -3,12 +3,15 @@
 > Claude.ai의 사용량 quota를 macOS 메뉴바에 실시간으로 표시하는 가벼운 SwiftUI 유틸리티
 
 <p align="center">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-13.0%2B-blue?logo=apple">
-  <img alt="Swift" src="https://img.shields.io/badge/Swift-5.9%2B-orange?logo=swift">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-26.0%2B-blue?logo=apple">
+  <img alt="Swift" src="https://img.shields.io/badge/Swift-6.2%2B-orange?logo=swift">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
+  <img alt="Design" src="https://img.shields.io/badge/Design-Liquid%20Glass-purple">
 </p>
 
-claude.ai 웹에서 보는 4가지 quota — **현재 세션(5h) / 주간 전체 / 주간 Sonnet / 주간 Design** — 을 메뉴바에서 한눈에 확인할 수 있습니다. 외부 의존성 0, 백그라운드 메모리 ~35MB.
+claude.ai 웹에서 보는 4가지 quota — **현재 세션(5h) / 주간 전체 / 주간 Sonnet / 주간 Design** — 을 메뉴바에서 한눈에 확인할 수 있습니다. macOS 26 Tahoe의 Liquid Glass(`.clear` variant + 동적 tint)로 디자인되어 데스크탑 배경이 카드를 통과해 비쳐 보입니다.
+
+외부 의존성 0, 백그라운드 메모리 ~35MB.
 
 ## 동작 원리
 
@@ -49,7 +52,7 @@ cd ClaudeUsageBar
 open ClaudeUsageBar.app
 ```
 
-요구사항: Xcode Command Line Tools (`xcode-select --install`) + macOS 13+
+요구사항: Xcode 17+ (Swift 6.2 포함) + macOS 26 Tahoe
 
 빌드 시 본인의 Apple Development 인증서가 있으면 자동 감지해서 안정 서명에 사용 (Keychain ACL이 rebuild에도 유지됨). 없으면 ad-hoc 서명으로 fallback.
 
@@ -108,15 +111,20 @@ quota 값이 `null`인 항목(해당 사용자 플랜에 없는 quota)은 표시
 ## 프로젝트 구조
 
 ```
-Sources/ClaudeUsageBar/
-├── ClaudeUsageBarApp.swift   # @main + MenuBarExtra 진입점
-├── CredentialStore.swift     # Keychain 읽기 (Security framework)
-├── ClaudeUsageProbe.swift    # /api/oauth/usage HTTP 호출 + 파싱
-├── UsageMonitor.swift        # 폴링 타이머 + 상태 (ObservableObject)
-└── MenuContentView.swift     # 메뉴 UI (Hero + secondary quotas + controls)
+ClaudeUsageBar/
+├── Sources/ClaudeUsageBar/
+│   ├── ClaudeUsageBarApp.swift   # @main + MenuBarExtra 진입점
+│   ├── CredentialStore.swift     # Keychain 읽기 (Security framework)
+│   ├── ClaudeUsageProbe.swift    # /api/oauth/usage HTTP 호출 + 파싱
+│   ├── UsageMonitor.swift        # 폴링 타이머 + 상태 (ObservableObject)
+│   └── MenuContentView.swift     # 메뉴 UI (Liquid Glass cards)
+├── Resources/AppIcon.icns        # 앱 아이콘 (% 글리프 squircle)
+├── scripts/make_icon.swift       # 아이콘 재생성 스크립트
+├── make_app.sh                   # .app 번들 패키징
+└── Package.swift                 # SPM 매니페스트 (macOS 26+, Swift 6.2)
 ```
 
-총 5개 파일, ~600줄. 검토 5분이면 충분.
+총 5개 Swift 파일, ~600줄. 검토 5분이면 충분.
 
 ## 라이선스
 

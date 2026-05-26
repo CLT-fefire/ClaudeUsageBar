@@ -6,25 +6,38 @@ struct MenuContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             titleBar
-            Divider().opacity(0.5)
-            heroSection
-            secondaryQuotas
-            Divider().opacity(0.5)
-            controlsSection
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+
+            GlassEffectContainer(spacing: 14) {
+                VStack(spacing: 10) {
+                    heroCard
+                    if let snapshot = monitor.snapshot {
+                        let others = snapshot.quotas.filter { $0.kind != .fiveHour }
+                        if !others.isEmpty {
+                            secondaryCard(others)
+                        }
+                    }
+                    controlsCard
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 14)
+            }
         }
-        .frame(width: 340)
+        .frame(width: 360)
     }
 
     // MARK: - Title Bar
 
     @ViewBuilder
     private var titleBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "gauge.with.dots.needle.bottom.50percent")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.tint)
             Text("Claude Usage")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
             Spacer()
             if let sub = monitor.snapshot?.subscriptionType {
                 subscriptionBadge(sub)
@@ -33,100 +46,142 @@ struct MenuContentView: View {
                 ProgressView().controlSize(.mini)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
     private func subscriptionBadge(_ raw: String) -> some View {
         Text(raw.uppercased())
             .font(.system(size: 9, weight: .bold))
-            .tracking(0.4)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(Color.accentColor.opacity(0.18)))
-            .foregroundStyle(Color.accentColor)
+            .tracking(0.5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .foregroundStyle(.tint)
+            .glassEffect(.clear.tint(.accentColor.opacity(0.12)), in: Capsule())
     }
 
-    // MARK: - Hero (Session)
+    // MARK: - Hero Card
 
     @ViewBuilder
-    private var heroSection: some View {
+    private var heroCard: some View {
+        Group {
+            if let session = monitor.snapshot?.session {
+                heroContent(session)
+            } else if let err = monitor.lastError {
+                errorContent(err)
+            } else {
+                loadingContent
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .glassEffect(heroGlass, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var heroGlass: Glass {
         if let session = monitor.snapshot?.session {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("현재 세션")
-                            .font(.system(size: 9, weight: .semibold))
-                            .tracking(0.6)
+            // .clear + 매우 옅은 tint로 진짜 유리처럼 뒷배경이 비치게.
+            return .clear.tint(barColor(session.percentUsed).opacity(0.10))
+        }
+        return .clear
+    }
+
+    @ViewBuilder
+    private func heroContent(_ session: ClaudeUsageProbe.Quota) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("현재 세션")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(session.percentUsed)")
+                            .font(.system(size: 44, weight: .bold, design: .rounded))
+                            .foregroundStyle(barColor(session.percentUsed))
+                            .contentTransition(.numericText())
+                            .monospacedDigit()
+                        Text("%")
+                            .font(.system(size: 22, weight: .semibold, design: .rounded))
+                            .foregroundStyle(barColor(session.percentUsed).opacity(0.7))
+                            .baselineOffset(4)
+                    }
+                }
+                Spacer()
+                if let reset = session.resetsAt {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("리셋까지")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.8)
                             .foregroundStyle(.secondary)
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("\(session.percentUsed)")
-                                .font(.system(size: 38, weight: .bold, design: .rounded))
-                                .foregroundStyle(barColor(session.percentUsed))
-                                .contentTransition(.numericText())
-                                .monospacedDigit()
-                            Text("%")
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                                .foregroundStyle(barColor(session.percentUsed).opacity(0.7))
-                                .baselineOffset(2)
-                        }
-                    }
-                    Spacer()
-                    if let reset = session.resetsAt {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("리셋까지")
-                                .font(.system(size: 9, weight: .semibold))
-                                .tracking(0.6)
-                                .foregroundStyle(.secondary)
-                            Text(formatResetCompact(reset))
-                                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.primary)
-                        }
+                        Text(formatResetCompact(reset))
+                            .font(.system(size: 15, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.primary)
                     }
                 }
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.primary.opacity(0.08))
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(barColor(session.percentUsed))
-                            .frame(width: max(2, geo.size.width * CGFloat(session.percentUsed) / 100))
-                    }
-                }
-                .frame(height: 6)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-        } else if let err = monitor.lastError {
-            errorView(err)
-        } else {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Claude 서버에서 조회 중…")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(14)
+            heroProgressBar(session)
         }
     }
 
-    // MARK: - Secondary Quotas
-
-    @ViewBuilder
-    private var secondaryQuotas: some View {
-        if let quotas = monitor.snapshot?.quotas {
-            let others = quotas.filter { $0.kind != .fiveHour }
-            if !others.isEmpty {
-                Divider().opacity(0.5)
-                VStack(spacing: 6) {
-                    ForEach(others) { quota in
-                        secondaryRow(quota)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+    private func heroProgressBar(_ session: ClaudeUsageProbe.Quota) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.12))
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                barColor(session.percentUsed),
+                                barColor(session.percentUsed).opacity(0.7)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: max(2, geo.size.width * CGFloat(session.percentUsed) / 100))
             }
         }
+        .frame(height: 7)
+    }
+
+    private var loadingContent: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text("Claude 서버에서 조회 중…")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func errorContent(_ err: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("조회 실패")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(err)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(4)
+            }
+        }
+    }
+
+    // MARK: - Secondary Quotas Card
+
+    private func secondaryCard(_ quotas: [ClaudeUsageProbe.Quota]) -> some View {
+        VStack(spacing: 10) {
+            ForEach(quotas) { quota in
+                secondaryRow(quota)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func secondaryRow(_ q: ClaudeUsageProbe.Quota) -> some View {
@@ -140,7 +195,7 @@ struct MenuContentView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.primary.opacity(0.06))
+                        .fill(.white.opacity(0.08))
                     Capsule()
                         .fill(barColor(q.percentUsed))
                         .frame(width: max(2, geo.size.width * CGFloat(q.percentUsed) / 100))
@@ -157,12 +212,10 @@ struct MenuContentView: View {
         .help(q.resetsAt.map { "리셋: \(formatResetCompact($0)) 후" } ?? "")
     }
 
-    // MARK: - Controls
+    // MARK: - Controls Card
 
-    @ViewBuilder
-    private var controlsSection: some View {
-        VStack(spacing: 10) {
-            // Refresh interval segmented picker
+    private var controlsCard: some View {
+        VStack(spacing: 12) {
             HStack(spacing: 8) {
                 Label {
                     Text("자동 갱신")
@@ -176,7 +229,6 @@ struct MenuContentView: View {
                 segmentedIntervalPicker
             }
 
-            // Status line
             HStack(spacing: 0) {
                 Image(systemName: "clock")
                     .font(.system(size: 9))
@@ -192,7 +244,6 @@ struct MenuContentView: View {
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(.tertiary)
 
-            // Action buttons
             HStack(spacing: 8) {
                 Button {
                     monitor.manualRefresh()
@@ -200,9 +251,9 @@ struct MenuContentView: View {
                     Label("새로고침", systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
                 .keyboardShortcut("r", modifiers: .command)
-                .controlSize(.small)
-                .buttonStyle(.bordered)
 
                 Button {
                     NSApplication.shared.terminate(nil)
@@ -210,67 +261,42 @@ struct MenuContentView: View {
                     Label("종료", systemImage: "power")
                         .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
                 .keyboardShortcut("q", modifiers: .command)
-                .controlSize(.small)
-                .buttonStyle(.bordered)
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var segmentedIntervalPicker: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             ForEach(UsageMonitor.availableIntervals, id: \.self) { sec in
                 let isSelected = monitor.refreshIntervalSeconds == sec
                 Button {
                     monitor.refreshIntervalSeconds = sec
                 } label: {
                     Text("\(sec / 60)m")
-                        .font(.system(size: 10,
-                                      weight: isSelected ? .semibold : .regular,
-                                      design: .monospaced))
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                        .frame(minWidth: 28, minHeight: 18)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(isSelected
-                                      ? Color.primary.opacity(0.14)
-                                      : Color.clear)
-                        )
+                        .font(.system(
+                            size: 10,
+                            weight: isSelected ? .semibold : .medium,
+                            design: .monospaced
+                        ))
+                        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                        .frame(minWidth: 32, minHeight: 22)
+                        .padding(.horizontal, 4)
                 }
                 .buttonStyle(.plain)
+                .glassEffect(
+                    isSelected
+                        ? .clear.tint(.accentColor.opacity(0.55)).interactive()
+                        : .clear.interactive(),
+                    in: Capsule()
+                )
             }
         }
-        .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-        )
-    }
-
-    // MARK: - Error
-
-    private func errorView(_ err: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("조회 실패")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(err)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineLimit(4)
-            }
-        }
-        .padding(14)
     }
 
     // MARK: - Formatting

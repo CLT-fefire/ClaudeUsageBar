@@ -3,7 +3,7 @@ import Foundation
 /// `https://api.anthropic.com/api/oauth/usage` 를 호출해서
 /// 5h / 7d / Sonnet / Omelette 등의 quota %를 가져온다.
 ///
-/// 인증: Keychain의 Claude OAuth access token (CredentialStore.load()).
+/// 인증: 자체 파일에 저장된 Claude OAuth access token (CredentialStore.load()).
 /// claude.ai 웹 페이지가 보여주는 것과 동일한 데이터 (둘 다 같은 백엔드).
 struct ClaudeUsageProbe {
 
@@ -54,6 +54,7 @@ struct ClaudeUsageProbe {
     }
 
     enum ProbeError: Error, LocalizedError {
+        case notSignedIn                  // 자격증명 파일 없음 → 로그인 UI로 전환
         case credentials(CredentialStore.LoadError)
         case unauthorized                 // 401 — 내부 신호 (갱신 후 재시도 트리거용)
         case reauthRequired               // 자동 갱신도 실패 → 사용자 재로그인 필요
@@ -64,6 +65,8 @@ struct ClaudeUsageProbe {
 
         var errorDescription: String? {
             switch self {
+            case .notSignedIn:
+                return "로그인이 필요합니다."
             case .credentials(let err): return err.localizedDescription
             case .unauthorized:
                 return "인증 실패 (401)."
@@ -111,12 +114,14 @@ struct ClaudeUsageProbe {
     private func loadCredentials() throws -> CredentialStore.Credentials {
         do {
             return try CredentialStore.load()
+        } catch CredentialStore.LoadError.notSignedIn {
+            throw ProbeError.notSignedIn
         } catch let err as CredentialStore.LoadError {
             throw ProbeError.credentials(err)
         }
     }
 
-    /// refreshToken으로 새 토큰을 발급받아 Keychain에 write-back 하고,
+    /// refreshToken으로 새 토큰을 발급받아 자체 파일에 write-back 하고,
     /// 메모리상의 자격증명도 갱신해서 돌려준다.
     private func refreshCredentials(
         using creds: CredentialStore.Credentials
@@ -133,21 +138,18 @@ struct ClaudeUsageProbe {
             throw ProbeError.network(err)
         }
 
-        // 회전된 refresh token 정합성 유지를 위해 Keychain에 즉시 반영.
-        // write-back 자체가 실패해도(권한 등) 이번 폴링은 메모리 토큰으로 진행.
-        try? CredentialStore.save(
-            accessToken: result.accessToken,
-            refreshToken: result.refreshToken,
-            expiresAt: result.expiresAt
-        )
-
-        return CredentialStore.Credentials(
+        // 회전된 refresh token 정합성 유지를 위해 자체 파일에 즉시 반영.
+        // (공유 Keychain 항목이 아니라 이 앱 전용 파일이므로 ACL churn 없음)
+        // write-back 자체가 실패해도 이번 폴링은 메모리 토큰으로 진행.
+        let updated = CredentialStore.Credentials(
             accessToken: result.accessToken,
             refreshToken: result.refreshToken,
             expiresAt: result.expiresAt,
-            subscriptionType: creds.subscriptionType,
-            organizationUuid: creds.organizationUuid
+            scopes: creds.scopes,
+            subscriptionType: creds.subscriptionType
         )
+        try? CredentialStore.save(updated)
+        return updated
     }
 
     private func fetchUsage(using creds: CredentialStore.Credentials) async throws -> Snapshot {

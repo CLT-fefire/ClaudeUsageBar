@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuContentView: View {
     @ObservedObject var monitor: UsageMonitor
     @State private var launchAtLoginEnabled = LaunchAtLogin.isEnabled
+    @State private var codeInput: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,20 +14,135 @@ struct MenuContentView: View {
 
             GlassEffectContainer(spacing: 14) {
                 VStack(spacing: 10) {
-                    heroCard
-                    if let snapshot = monitor.snapshot {
-                        let others = snapshot.quotas.filter { $0.kind != .fiveHour }
-                        if !others.isEmpty {
-                            secondaryCard(others)
+                    if monitor.isAuthenticated {
+                        heroCard
+                        if let snapshot = monitor.snapshot {
+                            let others = snapshot.quotas.filter { $0.kind != .fiveHour }
+                            if !others.isEmpty {
+                                secondaryCard(others)
+                            }
                         }
+                        controlsCard
+                    } else {
+                        authCard
+                        appControlsCard
                     }
-                    controlsCard
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 14)
             }
         }
         .frame(width: 360)
+    }
+
+    // MARK: - Auth Card
+
+    @ViewBuilder
+    private var authCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if monitor.isAwaitingCode {
+                Text("브라우저에서 로그인한 뒤, 표시되는 인증 코드를 붙여넣으세요.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                TextField("인증 코드 붙여넣기", text: $codeInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .onSubmit { submitCode() }
+
+                if let err = monitor.loginError {
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(3)
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        monitor.cancelLogin()
+                        codeInput = ""
+                    } label: {
+                        Text("취소").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+
+                    Button {
+                        submitCode()
+                    } label: {
+                        Label("확인", systemImage: "checkmark")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Claude에 로그인")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("사용량을 보려면 Claude 계정으로 로그인하세요.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if let err = monitor.loginError {
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(3)
+                }
+
+                Button {
+                    monitor.startLogin()
+                } label: {
+                    Label("Claude 로그인", systemImage: "arrow.up.forward.app")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func submitCode() {
+        monitor.submitCode(codeInput)
+        codeInput = ""
+    }
+
+    // MARK: - App Controls (로그인 전 화면용: 자동시작/종료만)
+
+    private var appControlsCard: some View {
+        VStack(spacing: 12) {
+            launchAtLoginRow
+            HStack(spacing: 8) {
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Label("종료", systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+                .keyboardShortcut("q", modifiers: .command)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
     }
 
     // MARK: - Title Bar
@@ -230,28 +346,7 @@ struct MenuContentView: View {
                 segmentedIntervalPicker
             }
 
-            HStack(spacing: 8) {
-                Label {
-                    Text("로그인 시 시작")
-                        .font(.system(size: 11, weight: .medium))
-                } icon: {
-                    Image(systemName: "power.circle")
-                        .font(.system(size: 10))
-                }
-                .foregroundStyle(.secondary)
-                Spacer()
-                Toggle("", isOn: $launchAtLoginEnabled)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .labelsHidden()
-                    .onChange(of: launchAtLoginEnabled) { _, newValue in
-                        let success = LaunchAtLogin.setEnabled(newValue)
-                        if !success {
-                            // 등록 실패 시 실제 상태로 되돌림
-                            launchAtLoginEnabled = LaunchAtLogin.isEnabled
-                        }
-                    }
-            }
+            launchAtLoginRow
 
             HStack(spacing: 0) {
                 Image(systemName: "clock")
@@ -280,6 +375,15 @@ struct MenuContentView: View {
                 .keyboardShortcut("r", modifiers: .command)
 
                 Button {
+                    monitor.signOut()
+                } label: {
+                    Label("로그아웃", systemImage: "rectangle.portrait.and.arrow.right")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+
+                Button {
                     NSApplication.shared.terminate(nil)
                 } label: {
                     Label("종료", systemImage: "power")
@@ -293,6 +397,31 @@ struct MenuContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var launchAtLoginRow: some View {
+        HStack(spacing: 8) {
+            Label {
+                Text("로그인 시 시작")
+                    .font(.system(size: 11, weight: .medium))
+            } icon: {
+                Image(systemName: "power.circle")
+                    .font(.system(size: 10))
+            }
+            .foregroundStyle(.secondary)
+            Spacer()
+            Toggle("", isOn: $launchAtLoginEnabled)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+                .onChange(of: launchAtLoginEnabled) { _, newValue in
+                    let success = LaunchAtLogin.setEnabled(newValue)
+                    if !success {
+                        // 등록 실패 시 실제 상태로 되돌림
+                        launchAtLoginEnabled = LaunchAtLogin.isEnabled
+                    }
+                }
+        }
     }
 
     private var segmentedIntervalPicker: some View {

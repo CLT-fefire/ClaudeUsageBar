@@ -1,15 +1,15 @@
 import Foundation
 
-/// Keychain의 refreshToken으로 Claude OAuth access token을 직접 갱신한다.
+/// 자체 저장된 refreshToken으로 Claude OAuth access token을 갱신한다.
 ///
-/// Claude Code/Desktop이 내부적으로 토큰을 자동 갱신할 때 쓰는 것과 동일한
-/// 엔드포인트/클라이언트를 그대로 사용한다. 덕분에 이 앱은 Claude 본체를
-/// 열지 않아도 만료된 access token을 스스로 되살릴 수 있다.
+/// 자체 PKCE 로그인(OAuthLogin)으로 발급받은 **독립 refresh token**을 사용하므로
+/// Claude Code/Desktop의 토큰 회전과 충돌하지 않는다. 갱신 결과는 공유 Keychain이
+/// 아니라 이 앱 전용 파일(CredentialStore)에만 저장된다.
 struct OAuthRefresher {
-    /// Claude Code의 공개 OAuth client_id. 모든 Claude Code 설치가 공유하는
-    /// public 값이라 비밀이 아니다.
-    static let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-    static let tokenURL = URL(string: "https://console.anthropic.com/v1/oauth/token")!
+    /// OAuth 상수는 ClaudeOAuth(OAuthLogin.swift)에서 단일 관리한다.
+    /// authorize/exchange/refresh가 동일한 client_id·token 엔드포인트를 써야 한다.
+    static var clientID: String { ClaudeOAuth.clientID }
+    static var tokenURL: URL { ClaudeOAuth.tokenURL }
 
     struct Result {
         let accessToken: String
@@ -27,7 +27,7 @@ struct OAuthRefresher {
         var errorDescription: String? {
             switch self {
             case .noRefreshToken:
-                return "Keychain에 refresh token이 없습니다. 재로그인이 필요합니다."
+                return "refresh token이 없습니다. 재로그인이 필요합니다."
             case .invalidGrant:
                 return "refresh token이 만료되었습니다. 재로그인이 필요합니다."
             case .http(let status, let body):

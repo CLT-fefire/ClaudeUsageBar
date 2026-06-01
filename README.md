@@ -7,6 +7,7 @@
   <img alt="Swift" src="https://img.shields.io/badge/Swift-6.2%2B-orange?logo=swift">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
   <img alt="Design" src="https://img.shields.io/badge/Design-Liquid%20Glass-purple">
+  <a href="https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/CLT-fefire/ClaudeUsageBar?label=download&logo=apple"></a>
 </p>
 
 claude.ai 웹에서 보는 4가지 quota — **현재 세션(5h) / 주간 전체 / 주간 Sonnet / 주간 Design** — 을 메뉴바에서 한눈에 확인할 수 있습니다. macOS 26 Tahoe의 Liquid Glass(`.clear` variant + 동적 tint)로 디자인되어 데스크탑 배경이 카드를 통과해 비쳐 보입니다.
@@ -15,10 +16,14 @@ claude.ai 웹에서 보는 4가지 quota — **현재 세션(5h) / 주간 전체
 
 ## 동작 원리
 
+**v0.5.0부터** 앱이 **자체 OAuth 로그인**으로 독립 토큰을 발급받아 앱 전용 파일에 저장합니다. Claude Code/Desktop이 쓰는 공유 Keychain 항목(`Claude Code-credentials`)은 **일절 건드리지 않습니다.**
+
 ```
-macOS Keychain ("Claude Code-credentials")
-    │ OAuth access_token 읽기
-    │ ↕ 만료 시 refresh_token으로 자동 갱신 후 write-back
+앱에서 직접 Claude 로그인 (PKCE OAuth, 최초 1회)
+    │ access_token + refresh_token (독립 발급)
+    ▼
+~/.config/ClaudeUsageBar/credentials.json   (파일 0600 / 디렉토리 0700)
+    │ access_token 읽기 / 만료 임박 시 자체 refresh
     ▼
 GET https://api.anthropic.com/api/oauth/usage
     │ Bearer <token>
@@ -29,62 +34,55 @@ GET https://api.anthropic.com/api/oauth/usage
 메뉴바 % + 4개 progress bar
 ```
 
-- **자격증명**: Claude Desktop 또는 `claude` CLI가 로그인 시 Keychain에 저장해둔 OAuth 토큰을 그대로 활용
-- **토큰 자동 갱신**: access token이 만료(임박)되거나 401이 떨어지면, Keychain의 `refresh_token`으로 Claude Code/Desktop과 **동일한 방식**으로 새 토큰을 직접 발급받아 Keychain에 다시 써넣습니다. 덕분에 Claude 본체를 열지 않아도 만료 때마다 재로그인할 필요가 없습니다 (refresh token 회전까지 반영하므로 Claude 본체 로그인과도 정합성 유지). refresh token 자체가 만료된 드문 경우에만 재로그인 안내를 띄웁니다.
+- **자격증명**: 앱에서 직접 Claude 계정으로 **PKCE(S256) OAuth 로그인** → 발급받은 **독립 토큰**을 앱 전용 파일(`~/.config/ClaudeUsageBar/credentials.json`, 권한 0600)에 저장합니다. 공유 Keychain 항목은 읽지도 쓰지도 않습니다.
+- **토큰 자동 갱신**: access token 만료가 임박하거나 401이 떨어지면 **자체 refresh token**으로 직접 새 토큰을 발급받아 도로 파일에 써넣습니다. 독립 토큰이라 Claude 본체의 토큰 회전과 충돌하지 않습니다. refresh token 자체가 만료된 드문 경우에만 재로그인 안내를 띄웁니다.
 - **데이터 소스**: claude.ai 웹이 호출하는 동일한 OAuth API → 웹에서 보는 값과 100% 일치
 - **갱신 주기**: 5분 / 15분 / 30분 / 60분 중 선택 (기본 60분, Anthropic rate-limit 보호)
-- **외부 의존성**: Foundation + SwiftUI + Security framework만 사용
+- **외부 의존성**: Foundation + SwiftUI + Security + CryptoKit만 사용. 서드파티 SPM 패키지 0개.
 
 ## 설치
 
-본 프로젝트는 **소스 빌드 배포 정책**을 따릅니다. 사전 빌드된 바이너리는 배포하지 않습니다 — 각자 자기 머신에서 빌드해서 (있으면) 자기 dev cert로 서명하는 게 가장 깨끗한 신뢰 체인을 만들어주기 때문입니다 ([상세 이유](#왜-바이너리-zip을-안-주나)).
+### 1) 서명된 dmg 다운로드 (권장)
+
+[**Releases**](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)에서 `ClaudeUsageBar_<버전>_aarch64.dmg`를 받습니다. Dear U Developer ID로 코드 서명되어 있습니다(아직 공증 전이라 **최초 1회만 우클릭 → 열기** 필요).
+
+1. dmg 열기 → `ClaudeUsageBar.app`을 `Applications` 폴더로 드래그
+2. **최초 실행만**: Finder에서 `/Applications/ClaudeUsageBar.app` 우클릭 → **열기** → 대화상자에서 다시 **열기**
+   (서명은 됐지만 공증 전이라 더블클릭하면 "확인되지 않은 개발자" 경고가 뜹니다. 우클릭 → 열기는 한 번만 하면 됩니다.)
+3. 이후부터는 그냥 더블클릭 / 자동 실행으로 무음 동작
+
+> Apple Silicon(arm64) 전용입니다.
+
+### 2) 소스에서 빌드 (대안)
+
+코드를 직접 감사하고 빌드하고 싶다면:
 
 ```bash
 git clone https://github.com/CLT-fefire/ClaudeUsageBar.git
 cd ClaudeUsageBar
-./make_app.sh
-open ClaudeUsageBar.app
-# 또는 /Applications/로 이동해서 영구 설치:
-# mv ClaudeUsageBar.app /Applications/
+./make_app.sh                 # release 빌드 + .app 번들 + 코드 서명
+# 배포용 dmg까지 만들려면:
+# ./make_dmg.sh               # → ClaudeUsageBar_<버전>_aarch64.dmg
+mv ClaudeUsageBar.app /Applications/
+open /Applications/ClaudeUsageBar.app
 ```
 
-요구사항:
+빌드 요구사항:
 - macOS 26.0 Tahoe 이상
-- Xcode 17+ (Command Line Tools 포함, Swift 6.2)
-- Claude Desktop 또는 `claude` CLI 로그인 상태 (Keychain에 자격증명 있어야 함)
+- Xcode 26 (Command Line Tools 포함, Swift 6.2 toolchain)
 
-빌드 시 본인의 Apple Development 인증서가 있으면 자동 감지해서 안정 서명에 사용 (Keychain ACL이 rebuild에도 유지됨). 없으면 ad-hoc 서명으로 fallback.
+`make_app.sh`는 로컬 키체인의 코드 서명 인증서를 자동 감지해서 안정 서명에 사용합니다. 우선순위는 **Developer ID Application → Apple Development → ad-hoc**이며, 어느 식별자도 repo에 하드코딩하지 않고 키체인에서만 읽습니다. Developer ID 인증서가 있으면 hardened runtime + secure timestamp까지 적용됩니다(공식 dmg가 그렇게 만들어집니다).
 
-### 왜 바이너리 zip을 안 주나?
+## 첫 실행 — Claude 로그인
 
-1. **개인 cert가 public 릴리스에 박힘** — 메인테이너 dev cert로 서명한 zip은 Dear U team ID 등 신원이 그대로 노출됨
-2. **다운로드 zip은 Gatekeeper 경고를 어차피 거쳐야 함** — "다운로드 즉시 실행"이라는 장점이 사실상 무력
-3. **각자 빌드가 신뢰 사슬이 더 깔끔** — 자기 cert로 서명한 자기 머신 바이너리 → 본인이 빌드 시점에 코드 감사한 그대로의 상태가 보장됨
-4. **Keychain ACL이 자기 환경에 귀속** — rebuild에도 안정 (메인테이너가 cert를 바꿔도 영향 없음)
+이 앱은 **자체 PKCE OAuth 로그인**으로 독립 토큰을 발급받습니다. Claude Desktop/CLI 설치나 공유 Keychain 접근은 **필요 없습니다.**
 
-## 첫 실행 시 권한 부여
+1. 메뉴바 아이콘 클릭 → **로그인** → **Claude 로그인** 버튼 → 브라우저가 열립니다.
+2. Claude 계정으로 로그인한 뒤, 콜백 페이지에 표시되는 **인증 코드를 복사**합니다.
+3. 앱 입력칸에 붙여넣고 **확인**. (코드는 `코드#state` 형태 전체를 그대로 붙여넣어도 됩니다.)
+4. 토큰은 `~/.config/ClaudeUsageBar/credentials.json`(파일 권한 0600)에 저장됩니다.
 
-이 앱은 Keychain 항목 `Claude Code-credentials`에 **읽기**(토큰 조회)와 **쓰기**(갱신된 토큰 저장)를 합니다. macOS는 이 둘을 **별개의 권한**으로 취급하기 때문에, 처음 며칠 사용하는 동안 다음과 같은 프롬프트가 **최대 2번** 뜨고 그때마다 **로그인 비밀번호 입력**을 요구할 수 있습니다.
-
-**① 읽기 권한** — 메뉴바 아이콘을 처음 클릭할 때:
-
-> "ClaudeUsageBar"가 키체인 정보 **"Claude Code-credentials"** 에 접근하려고 합니다.
->
-> [거부] [허용] **[항상 허용]**
-
-**② 수정 권한** — 토큰을 처음 자동 갱신할 때(보통 access token이 만료되는 시점, 길게는 며칠 뒤):
-
-> "ClaudeUsageBar"가 키체인 정보 **"Claude Code-credentials"** 를 **변경**하려고 합니다.
->
-> [거부] [허용] **[항상 허용]**
-
-두 프롬프트 모두 반드시 **"항상 허용"** 을 선택 + 로그인 비밀번호를 입력하세요.
-
-- **"허용"** 만 누르면 1회용이라 다음 번에 또 묻습니다 → **"항상 허용"** 을 눌러야 그 항목에 한해 영구 통과됩니다.
-- 두 권한 모두 "항상 허용" 하고 나면 그 후로는 비밀번호 없이 **완전 무음**으로 동작합니다.
-- 앱을 자주 rebuild하면(특히 ad-hoc 서명 시) 서명 해시가 바뀌어 프롬프트가 다시 뜰 수 있습니다 — Apple Development 인증서로 서명하면 rebuild에도 ACL이 유지됩니다([상세](#왜-바이너리-zip을-안-주나)).
-
-> 💡 왜 "변경" 권한까지? access token이 만료되면 앱이 Keychain의 refresh token으로 새 토큰을 발급받아 **도로 Keychain에 저장**하기 때문입니다. 이렇게 해야 Claude Code/Desktop 본체와 토큰이 어긋나지 않습니다([동작 원리](#동작-원리) 참고). 토큰은 본인 머신에서 Anthropic 본체로만 전송됩니다.
+로그인 후 우측 메뉴바에 `%` 숫자가 표시되면 끝입니다. 코드는 발급 후 짧은 시간 내에 입력해야 하며, 시간이 지났거나 state가 어긋났으면 **로그인부터 다시** 시작하세요.
 
 ## 표시되는 Quota
 
@@ -93,45 +91,39 @@ open ClaudeUsageBar.app
 | 현재 세션 | `five_hour` | 5시간 롤링 윈도우 |
 | 주간 전체 | `seven_day` | 모든 모델 합산 주간 |
 | 주간 Sonnet | `seven_day_sonnet` | Sonnet 전용 주간 |
-| 주간 Design | `seven_day_omelette` | Design 도구 quota |
+| 주간 Design | `seven_day_omelette` | Design(Opus) 도구 quota |
 
 quota 값이 `null`인 항목(해당 사용자 플랜에 없는 quota)은 표시되지 않습니다.
 
-## 보안 고지
-
-이 앱이 접근하는 권한:
+## 보안 / 프라이버시
 
 | 무엇 | 어떻게 |
 |---|---|
-| Keychain의 `Claude Code-credentials` 항목 1개 | 읽기 + (토큰 갱신 시) 쓰기. macOS Keychain ACL로 사용자가 "항상 허용" 명시적 승인 |
-| `api.anthropic.com` (usage 조회) | HTTPS GET |
-| `console.anthropic.com` (토큰 갱신) | HTTPS POST — Keychain의 refresh token만 전송, Claude Code/Desktop이 쓰는 것과 동일 엔드포인트 |
-| **외부 서버, 텔레메트리, 자동 업데이트** | **없음** |
+| 토큰 저장 | 자체 PKCE 로그인으로 발급한 **독립** OAuth 토큰을 `~/.config/ClaudeUsageBar/credentials.json`(파일 0600 / 디렉토리 0700)에만 저장. 공유 Keychain 항목(`Claude Code-credentials`)은 읽지도 쓰지도 않음 |
+| `claude.ai` | 로그인(PKCE authorize) — HTTPS |
+| `platform.claude.com` | 토큰 교환·갱신 — HTTPS POST |
+| `api.anthropic.com` | 사용량 조회 — HTTPS GET (`Authorization: Bearer`) |
+| 외부 서버 · 텔레메트리 · 자동 업데이트 | **없음** |
 
-- 토큰은 본인 머신에서 Anthropic 본체로만 나갑니다 (제3자 서버 경유 없음).
-- Keychain 쓰기는 갱신된 토큰을 도로 저장하는 용도뿐이며, Claude Code/Desktop이 만든 항목 구조를 그대로 보존합니다(토큰 3개 필드만 교체).
-- 권한 범위는 Claude Desktop/CLI가 이미 가지고 있는 것과 동일 (새로 권한이 생기지 않음).
-- 본 코드는 MIT 라이선스로 공개되어 누구든 감사 가능.
-
-권한이 의심스러우면 `Sources/ClaudeUsageBar/CredentialStore.swift` (Keychain 읽기/쓰기), `OAuthRefresher.swift` (토큰 갱신), `ClaudeUsageProbe.swift` (API 호출) 세 파일만 보면 전체가 다 들어있습니다.
+- 토큰은 본인 머신에서 Anthropic 엔드포인트로만 전송됩니다 (제3자 서버 경유 없음).
+- 분석 도구·텔레메트리 전무. 오픈소스(MIT)라 누구든 직접 감사 가능.
+- 권한이 의심스러우면 `OAuthLogin.swift`(PKCE 로그인), `CredentialStore.swift`(파일 저장), `OAuthRefresher.swift`(토큰 갱신), `ClaudeUsageProbe.swift`(API 호출) 네 파일만 보면 전부 들어 있습니다.
 
 ## 트러블슈팅
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `Keychain 항목을 찾을 수 없습니다` | Claude Desktop/CLI 미로그인 | `claude` 실행 후 로그인 또는 Claude Desktop 로그인 |
-| Keychain 다이얼로그가 반복해서 뜸 | "허용"만 누름 (1회용) | "항상 허용" 선택 (읽기·변경 프롬프트 **둘 다**) |
-| "...를 **변경**하려고 합니다" 프롬프트 | 첫 토큰 자동 갱신 시 수정 권한 요청 | **"항상 허용"** + 비밀번호 입력 (1회만, 정상 동작) |
-| 자주 rebuild 후 다이얼로그 다시 뜸 | ad-hoc 서명 사용 중 (해시 변동) | Apple Development 인증서 보유 시 자동 해결 / Keychain Access.app에서 ACL 수동 추가 |
-| `HTTP 401` | access token 만료 | 앱이 refresh token으로 자동 갱신·재시도 (보통 사용자 조치 불필요) |
-| `자동 갱신하지 못했습니다 ... 재로그인` | refresh token까지 만료 | `claude /login` 또는 Claude Desktop 재로그인 |
+| `로그인이 필요합니다` | 아직 미로그인 | 메뉴 → **로그인** → **Claude 로그인** |
+| 인증 코드가 거부됨 | 코드 만료 / state 불일치 | **로그인부터 다시** 시작. `코드#state` 전체를 붙여넣기 |
+| Gatekeeper "확인되지 않은 개발자" | 서명됐으나 공증 전 (또는 미서명 빌드) | 최초 1회 **우클릭 → 열기**. 또는 `xattr -dr com.apple.quarantine /Applications/ClaudeUsageBar.app` |
+| `HTTP 401` | access token 만료 | 앱이 refresh token으로 자동 갱신·재시도 (보통 조치 불필요) |
+| `자동 갱신하지 못했습니다 ... 재로그인` | refresh token까지 만료 | 메뉴 → **로그아웃** 후 다시 로그인 |
 | `HTTP 429` | Rate-limit | 갱신 주기를 늘리세요 (60분 권장) |
-| 앱 2개가 실행되는데 메뉴바엔 안 보임 | macOS 26.0.x SwiftUI MenuBarExtra 회귀 의심 / App Translocation | 아래 [Clean Install](#clean-install) 절차 진행 |
-| Gatekeeper "확인되지 않은 개발자" | dev cert 미보유 → ad-hoc 서명 | Finder에서 우클릭 → 열기 (한 번만), 이후엔 무음 동작 |
+| 앱은 실행되는데 메뉴바에 안 보임 | macOS 26.0.x SwiftUI MenuBarExtra 회귀 의심 / App Translocation | 아래 [Clean Install](#clean-install) 또는 macOS 26.1+ 업데이트 |
 
 ### Clean Install
 
-이전 버전을 시도했다가 좀비 프로세스 / LaunchServices 캐시 / 잘못된 위치의 `.app` 등 잔재가 남아서 안 풀리는 경우, 이 절차로 깨끗하게 다시 시작합니다.
+이전 버전을 시도했다가 좀비 프로세스 / LaunchServices 캐시 / 잘못된 위치의 `.app` 등 잔재가 남아 안 풀리는 경우, 이 절차로 깨끗하게 다시 시작합니다.
 
 ```bash
 # 1. 좀비 프로세스 종료
@@ -139,24 +131,19 @@ killall -9 ClaudeUsageBar 2>/dev/null
 
 # 2. 이전 잔재 정리
 rm -rf ~/Downloads/ClaudeUsageBar.app /Applications/ClaudeUsageBar.app 2>/dev/null
-rm -rf ~/ClaudeUsageBar /Users/Shared/Source/ClaudeUsageBar 2>/dev/null
 
 # 3. LaunchServices 캐시 리프레시 (구버전 등록 정보 제거)
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
     -kill -seed -r -domain local -domain system -domain user
 
-# 4. 깨끗하게 다시 빌드
-cd ~/   # 또는 원하는 경로
-git clone https://github.com/CLT-fefire/ClaudeUsageBar.git
-cd ClaudeUsageBar
-./make_app.sh
-
-# 5. 안정 위치(/Applications/)로 이동 + 실행
-mv ClaudeUsageBar.app /Applications/
+# 4. dmg 다시 받아 /Applications/로 드래그 후 실행
+#    (또는 소스에서: git clone ... && cd ClaudeUsageBar && ./make_app.sh && mv ClaudeUsageBar.app /Applications/)
 open /Applications/ClaudeUsageBar.app
 ```
 
-메뉴바에 `%` 숫자가 나타나면 클릭 → Keychain 다이얼로그 → **항상 허용** + 로그인 비밀번호 (1회).
+> 토큰까지 완전 초기화하려면 `rm -rf ~/.config/ClaudeUsageBar` 후 다시 로그인하세요.
+
+메뉴바에 `%` 숫자가 나타나면 클릭 → 사용량 카드 4개가 보입니다. 미로그인 상태면 **로그인 → Claude 로그인** 절차부터.
 
 ### 진단 명령
 
@@ -205,18 +192,32 @@ softwareupdate --list   # 사용 가능한 업데이트 확인
 ClaudeUsageBar/
 ├── Sources/ClaudeUsageBar/
 │   ├── ClaudeUsageBarApp.swift   # @main + MenuBarExtra 진입점
-│   ├── CredentialStore.swift     # Keychain 읽기/쓰기 (Security framework)
+│   ├── OAuthLogin.swift          # 자체 PKCE(S256) OAuth 로그인 + 코드↔토큰 교환
+│   ├── CredentialStore.swift     # 독립 토큰을 앱 전용 파일에 저장 (~/.config/ClaudeUsageBar)
 │   ├── OAuthRefresher.swift      # refresh_token으로 토큰 자동 갱신
 │   ├── ClaudeUsageProbe.swift    # /api/oauth/usage HTTP 호출 + 파싱 + 갱신 연계
 │   ├── UsageMonitor.swift        # 폴링 타이머 + 상태 (ObservableObject)
+│   ├── LaunchAtLogin.swift       # SMAppService 로그인 시 자동 실행 토글
 │   └── MenuContentView.swift     # 메뉴 UI (Liquid Glass cards)
 ├── Resources/AppIcon.icns        # 앱 아이콘 (% 글리프 squircle)
 ├── scripts/make_icon.swift       # 아이콘 재생성 스크립트
-├── make_app.sh                   # .app 번들 패키징
+├── make_app.sh                   # .app 번들 패키징 + 코드 서명
+├── make_dmg.sh                   # 배포용 dmg 패키징 + 서명
 └── Package.swift                 # SPM 매니페스트 (macOS 26+, Swift 6.2)
 ```
 
-총 5개 Swift 파일, ~600줄. 검토 5분이면 충분.
+총 8개 Swift 파일, ~600줄. 검토 5분이면 충분.
+
+## 버전 / 로드맵
+
+최신: **v0.6.0** (2026-06-01) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
+
+- v0.1.0 — 메뉴바 % 표시 + 4개 quota 진행률
+- v0.2.0 — Liquid Glass 디자인 + 갱신 주기 설정
+- v0.3.0 — SMAppService 기반 로그인 시 자동 실행 토글
+- v0.4.0 — OAuth 토큰 자동 갱신
+- v0.5.0 — 독립 OAuth 로그인 전환 (공유 Keychain 의존 제거, 재인증 팝업 문제 해결)
+- v0.6.0 — **서명된 바이너리 배포 전환** (Dear U Developer ID 서명 + dmg를 GitHub Release로 배포)
 
 ## 라이선스
 

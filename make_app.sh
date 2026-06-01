@@ -42,9 +42,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key>
     <string>Claude Usage Bar</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.5.0</string>
+    <string>0.6.0</string>
     <key>CFBundleVersion</key>
-    <string>5</string>
+    <string>6</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -61,20 +61,38 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# 안정 서명(Stable signing):
-# Apple Development 인증서가 있으면 그걸로 서명. 그래야 rebuild 해도 동일한
-# Designated Requirement가 유지되어 Keychain ACL("Always Allow")이 계속 유효.
-# 없으면 ad-hoc(서명 hash가 빌드마다 바뀜 → Keychain이 매번 새 앱으로 인식).
+# 코드 서명 — 우선순위:
+#   1) Developer ID Application — 배포용 cert. 다운로드 배포 시 Gatekeeper "손상됨/미확인
+#      개발자" 하드블록을 제거하고(공증 전이라 최초 1회 우클릭→열기만 필요), hardened
+#      runtime + secure timestamp를 적용한다. v0.6.0부터 서명 dmg를 GitHub Release로 배포.
+#   2) Apple Development        — 개발용 cert. 로컬 실행엔 충분하나 배포엔 부적합(~1년 만료).
+#   3) ad-hoc                   — cert 없음. 로컬 빌드 실행용(다운로드 배포엔 부적합).
+# 어느 식별자도 코드/repo에 하드코딩하지 않고 로컬 키체인에서 자동 탐지만 한다.
+# (이 앱은 v0.5.0부터 Keychain을 쓰지 않고 자체 PKCE OAuth + 파일 저장이라 서명은 배포·무결성용.)
 IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep "Apple Development:" \
+    | grep "Developer ID Application:" \
     | head -1 \
     | awk -F'"' '{print $2}')
+SIGN_KIND="Developer ID"
+
+if [ -z "$IDENTITY" ]; then
+    IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+        | grep "Apple Development:" \
+        | head -1 \
+        | awk -F'"' '{print $2}')
+    SIGN_KIND="Apple Development"
+fi
 
 if [ -n "$IDENTITY" ]; then
-    echo "▶ Signing with: $IDENTITY"
-    codesign --force --deep --sign "$IDENTITY" --options runtime "$APP"
+    echo "▶ Signing with ($SIGN_KIND): $IDENTITY"
+    if [ "$SIGN_KIND" = "Developer ID" ]; then
+        # secure timestamp는 네트워크 필요(공증 사전요건). Developer ID 경로에만 적용.
+        codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" "$APP"
+    else
+        codesign --force --deep --options runtime --sign "$IDENTITY" "$APP"
+    fi
 else
-    echo "▶ Apple Development 인증서 없음 → ad-hoc 서명 (Keychain 매번 다시 물음)"
+    echo "▶ 서명 인증서 없음 → ad-hoc 서명 (Keychain 매번 다시 물음)"
     codesign --force --deep --sign - "$APP"
 fi
 

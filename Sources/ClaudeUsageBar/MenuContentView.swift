@@ -294,11 +294,31 @@ struct MenuContentView: View {
             ForEach(quotas) { quota in
                 secondaryRow(quota)
             }
+            if let reset = weeklyResetDate(quotas) {
+                Divider().opacity(0.4)
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 9))
+                    Text("주간 리셋까지 \(formatResetCompact(reset))")
+                    Spacer()
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.tertiary)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
         .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// 주간 quota들의 대표 리셋 시각. 7일 윈도우는 공통이므로 `sevenDay`를
+    /// 우선 쓰고, 없으면 가장 먼저 발견되는 non-nil 값을 쓴다.
+    private func weeklyResetDate(_ quotas: [ClaudeUsageProbe.Quota]) -> Date? {
+        if let main = quotas.first(where: { $0.kind == .sevenDay })?.resetsAt {
+            return main
+        }
+        return quotas.compactMap { $0.resetsAt }.first
     }
 
     private func secondaryRow(_ q: ClaudeUsageProbe.Quota) -> some View {
@@ -326,7 +346,6 @@ struct MenuContentView: View {
                 .frame(width: 36, alignment: .trailing)
                 .monospacedDigit()
         }
-        .help(q.resetsAt.map { "리셋: \(formatResetCompact($0)) 후" } ?? "")
     }
 
     // MARK: - Controls Card
@@ -351,14 +370,8 @@ struct MenuContentView: View {
             HStack(spacing: 0) {
                 Image(systemName: "clock")
                     .font(.system(size: 9))
-                Text(" 마지막 \(formatLastUpdated())")
+                Text(" 마지막 갱신 \(formatLastUpdated())")
                 Spacer()
-                if monitor.nextRefreshAt != .distantFuture {
-                    Text("다음 \(formatNextRefresh())")
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 9))
-                        .padding(.leading, 2)
-                }
             }
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(.tertiary)
@@ -468,8 +481,10 @@ struct MenuContentView: View {
         let delta = date.timeIntervalSinceNow
         if delta <= 0 { return "지금" }
         let total = Int(delta)
-        let h = total / 3600
+        let d = total / 86400
+        let h = (total % 86400) / 3600
         let m = (total % 3600) / 60
+        if d > 0 { return "\(d)일 \(h)h" }
         if h > 0 { return "\(h)h \(m)m" }
         return "\(m)m"
     }
@@ -477,14 +492,6 @@ struct MenuContentView: View {
     private func formatLastUpdated() -> String {
         if monitor.lastUpdated == .distantPast { return "—" }
         return monitor.lastUpdated.formatted(date: .omitted, time: .shortened)
-    }
-
-    private func formatNextRefresh() -> String {
-        let delta = monitor.nextRefreshAt.timeIntervalSinceNow
-        if delta <= 0 { return "곧" }
-        let m = Int(delta) / 60
-        let s = Int(delta) % 60
-        return m > 0 ? "\(m)m\(s)s" : "\(s)s"
     }
 
     private func barColor(_ pct: Int) -> Color {

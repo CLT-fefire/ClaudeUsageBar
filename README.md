@@ -210,7 +210,7 @@ ClaudeUsageBar/
 
 ## 버전 / 로드맵
 
-최신: **v0.6.0** (2026-06-01) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
+최신: **v0.7.0** (2026-06-04) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
 
 - v0.1.0 — 메뉴바 % 표시 + 4개 quota 진행률
 - v0.2.0 — Liquid Glass 디자인 + 갱신 주기 설정
@@ -218,6 +218,7 @@ ClaudeUsageBar/
 - v0.4.0 — OAuth 토큰 자동 갱신
 - v0.5.0 — 독립 OAuth 로그인 전환 (공유 Keychain 의존 제거, 재인증 팝업 문제 해결)
 - v0.6.0 — **서명된 바이너리 배포 전환** (Dear U Developer ID 서명 + dmg를 GitHub Release로 배포)
+- v0.7.0 — 주간 리셋까지 남은 시간 표시 + 부정확한 "다음 갱신" 카운트다운 제거
 
 ## 라이선스
 

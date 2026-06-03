@@ -8,7 +8,6 @@ final class UsageMonitor: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var isProbing: Bool = false
     @Published private(set) var lastUpdated: Date = .distantPast
-    @Published private(set) var nextRefreshAt: Date = .distantFuture
 
     /// 자체 PKCE 로그인 기반 인증 상태. 자격증명 파일 존재 여부로 결정.
     @Published private(set) var isAuthenticated: Bool
@@ -156,13 +155,11 @@ final class UsageMonitor: ObservableObject {
         isAuthenticated = false
         snapshot = nil
         lastError = nil
-        nextRefreshAt = .distantFuture
     }
 
     private func scheduleNext() {
         guard isAuthenticated else { return }
         let interval = TimeInterval(max(60, refreshIntervalSeconds))
-        nextRefreshAt = Date().addingTimeInterval(interval)
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in

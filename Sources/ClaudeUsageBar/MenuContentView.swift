@@ -17,7 +17,7 @@ struct MenuContentView: View {
                     if monitor.isAuthenticated {
                         heroCard
                         if let snapshot = monitor.snapshot {
-                            let others = snapshot.quotas.filter { $0.kind != .fiveHour }
+                            let others = snapshot.quotas.filter { $0.group != .session }
                             if !others.isEmpty {
                                 secondaryCard(others)
                             }
@@ -196,7 +196,7 @@ struct MenuContentView: View {
     private var heroGlass: Glass {
         if let session = monitor.snapshot?.session {
             // .clear + 매우 옅은 tint로 진짜 유리처럼 뒷배경이 비치게.
-            return .clear.tint(barColor(session.percentUsed).opacity(0.10))
+            return .clear.tint(barColor(session).opacity(0.10))
         }
         return .clear
     }
@@ -213,12 +213,12 @@ struct MenuContentView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text("\(session.percentUsed)")
                             .font(.system(size: 44, weight: .bold, design: .rounded))
-                            .foregroundStyle(barColor(session.percentUsed))
+                            .foregroundStyle(barColor(session))
                             .contentTransition(.numericText())
                             .monospacedDigit()
                         Text("%")
                             .font(.system(size: 22, weight: .semibold, design: .rounded))
-                            .foregroundStyle(barColor(session.percentUsed).opacity(0.7))
+                            .foregroundStyle(barColor(session).opacity(0.7))
                             .baselineOffset(4)
                     }
                 }
@@ -248,8 +248,8 @@ struct MenuContentView: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                barColor(session.percentUsed),
-                                barColor(session.percentUsed).opacity(0.7)
+                                barColor(session),
+                                barColor(session).opacity(0.7)
                             ],
                             startPoint: .leading,
                             endPoint: .trailing
@@ -312,18 +312,21 @@ struct MenuContentView: View {
         .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
     }
 
-    /// 주간 quota들의 대표 리셋 시각. 7일 윈도우는 공통이므로 `sevenDay`를
-    /// 우선 쓰고, 없으면 가장 먼저 발견되는 non-nil 값을 쓴다.
+    /// 주간 quota들의 대표 리셋 시각. 7일 윈도우는 공통이므로 `weekly_all`을
+    /// 우선 쓰고, 없으면 첫 주간 항목, 그래도 없으면 가장 먼저 발견되는 값을 쓴다.
     private func weeklyResetDate(_ quotas: [ClaudeUsageProbe.Quota]) -> Date? {
-        if let main = quotas.first(where: { $0.kind == .sevenDay })?.resetsAt {
+        if let main = quotas.first(where: { $0.kind == "weekly_all" })?.resetsAt {
             return main
+        }
+        if let weekly = quotas.first(where: { $0.group == .weekly })?.resetsAt {
+            return weekly
         }
         return quotas.compactMap { $0.resetsAt }.first
     }
 
     private func secondaryRow(_ q: ClaudeUsageProbe.Quota) -> some View {
         HStack(spacing: 10) {
-            Text(shortLabel(q.kind))
+            Text(shortLabel(q))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 80, alignment: .leading)
@@ -334,7 +337,7 @@ struct MenuContentView: View {
                     Capsule()
                         .fill(.white.opacity(0.08))
                     Capsule()
-                        .fill(barColor(q.percentUsed))
+                        .fill(barColor(q))
                         .frame(width: max(2, geo.size.width * CGFloat(q.percentUsed) / 100))
                 }
             }
@@ -342,7 +345,7 @@ struct MenuContentView: View {
 
             Text("\(q.percentUsed)%")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(barColor(q.percentUsed))
+                .foregroundStyle(barColor(q))
                 .frame(width: 36, alignment: .trailing)
                 .monospacedDigit()
         }
@@ -467,13 +470,13 @@ struct MenuContentView: View {
 
     // MARK: - Formatting
 
-    private func shortLabel(_ kind: ClaudeUsageProbe.Quota.Kind) -> String {
-        switch kind {
-        case .fiveHour: return "세션 5h"
-        case .sevenDay: return "주간 전체"
-        case .sevenDayOpus: return "주간 Opus"
-        case .sevenDaySonnet: return "주간 Sonnet"
-        case .sevenDayOmelette: return "주간 Design"
+    /// 데이터 주도 라벨. weekly_scoped는 서버가 준 scope 모델명(예: "Sonnet")을 그대로 쓴다.
+    private func shortLabel(_ q: ClaudeUsageProbe.Quota) -> String {
+        switch q.kind {
+        case "session": return "세션 5h"
+        case "weekly_all": return "주간 전체"
+        case "weekly_scoped": return "주간 \(q.scopeLabel ?? "모델")"
+        default: return q.scopeLabel ?? q.kind
         }
     }
 
@@ -492,6 +495,16 @@ struct MenuContentView: View {
     private func formatLastUpdated() -> String {
         if monitor.lastUpdated == .distantPast { return "—" }
         return monitor.lastUpdated.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// 색상은 서버 severity를 우선 반영하고(warning/critical), normal·unknown이면
+    /// 퍼센트 임계값으로 폴백한다. (서버가 낮은 %에서도 critical을 줄 수 있으므로)
+    private func barColor(_ q: ClaudeUsageProbe.Quota) -> Color {
+        switch q.severity {
+        case .critical: return .red
+        case .warning: return .orange
+        case .normal, .unknown: return barColor(q.percentUsed)
+        }
     }
 
     private func barColor(_ pct: Int) -> Color {

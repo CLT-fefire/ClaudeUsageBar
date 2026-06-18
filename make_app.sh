@@ -42,9 +42,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key>
     <string>Claude Usage Bar</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.7.0</string>
+    <string>0.8.0</string>
     <key>CFBundleVersion</key>
-    <string>7</string>
+    <string>8</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key>

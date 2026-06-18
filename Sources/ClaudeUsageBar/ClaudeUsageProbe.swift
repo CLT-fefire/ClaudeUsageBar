@@ -7,40 +7,32 @@ import Foundation
 /// claude.ai 웹 페이지가 보여주는 것과 동일한 데이터 (둘 다 같은 백엔드).
 struct ClaudeUsageProbe {
 
+    /// 2026-06-15 정책 변경 이후 사용량 API는 `limits` 배열로 제한을 세분화해서 돌려준다.
+    /// 각 항목은 자기서술형(kind/group/severity/scope)이라 고정 enum 대신
+    /// 데이터 주도 모델로 받는다. (구버전 응답은 레거시 최상위 키에서 폴백 파싱)
     struct Quota: Hashable, Identifiable {
-        let kind: Kind
-        let utilization: Double  // 0~100 (서버가 이미 0.0~100.0 스케일로 반환)
+        let id: String           // 안정 식별자: kind(+scope)
+        let group: Group         // session / weekly / other
+        let kind: String         // 원본 kind ("session", "weekly_all", "weekly_scoped", …)
+        let scopeLabel: String?  // scope.model.display_name (예: "Sonnet")
+        let utilization: Double  // 0~100 (서버가 이미 0~100 스케일로 반환)
         let resetsAt: Date?
+        let severity: Severity   // 서버 판정 심각도 (색상에 우선 반영)
+        let isActive: Bool       // 현재 적용 중인 제한인지
 
-        var id: Kind { kind }
         var percentUsed: Int { Int(utilization.rounded()) }
 
-        enum Kind: String, CaseIterable {
-            case fiveHour
-            case sevenDay
-            case sevenDayOpus
-            case sevenDaySonnet
-            case sevenDayOmelette
+        enum Group: String {
+            case session
+            case weekly
+            case other
+        }
 
-            var apiKey: String {
-                switch self {
-                case .fiveHour: return "five_hour"
-                case .sevenDay: return "seven_day"
-                case .sevenDayOpus: return "seven_day_opus"
-                case .sevenDaySonnet: return "seven_day_sonnet"
-                case .sevenDayOmelette: return "seven_day_omelette"
-                }
-            }
-
-            var displayName: String {
-                switch self {
-                case .fiveHour: return "현재 세션 (5h)"
-                case .sevenDay: return "주간 (모든 모델)"
-                case .sevenDayOpus: return "주간 (Opus)"
-                case .sevenDaySonnet: return "주간 (Sonnet)"
-                case .sevenDayOmelette: return "주간 (Design)"
-                }
-            }
+        enum Severity: String {
+            case normal
+            case warning
+            case critical
+            case unknown
         }
     }
 
@@ -50,7 +42,7 @@ struct ClaudeUsageProbe {
         let extraUsageEnabled: Bool
         let capturedAt: Date
 
-        var session: Quota? { quotas.first { $0.kind == .fiveHour } }
+        var session: Quota? { quotas.first { $0.group == .session } }
     }
 
     enum ProbeError: Error, LocalizedError {
@@ -194,14 +186,12 @@ struct ClaudeUsageProbe {
             throw ProbeError.parse("응답이 JSON 객체 아님")
         }
 
-        var quotas: [Quota] = []
-        for kind in Quota.Kind.allCases {
-            guard let obj = raw[kind.apiKey] as? [String: Any],
-                  let utilization = obj["utilization"] as? Double else {
-                continue
-            }
-            let resetsAt = (obj["resets_at"] as? String).flatMap(Self.isoDate)
-            quotas.append(Quota(kind: kind, utilization: utilization, resetsAt: resetsAt))
+        // 2026-06-15 정책: `limits` 배열이 정식 소스. 있으면 거기서, 없으면 레거시 키에서.
+        let quotas: [Quota]
+        if let limits = raw["limits"] as? [[String: Any]], !limits.isEmpty {
+            quotas = limits.compactMap(Self.parseLimit)
+        } else {
+            quotas = Self.parseLegacyQuotas(raw)
         }
 
         let extra = raw["extra_usage"] as? [String: Any]
@@ -213,6 +203,54 @@ struct ClaudeUsageProbe {
             extraUsageEnabled: extraEnabled,
             capturedAt: Date()
         )
+    }
+
+    /// `limits` 배열의 한 항목을 Quota로. percent는 정수/실수 모두 허용.
+    private static func parseLimit(_ obj: [String: Any]) -> Quota? {
+        guard let kind = obj["kind"] as? String else { return nil }
+        guard let percent = (obj["percent"] as? Double)
+            ?? (obj["percent"] as? Int).map(Double.init) else { return nil }
+
+        let group = Quota.Group(rawValue: (obj["group"] as? String) ?? "") ?? .other
+        let severity = Quota.Severity(rawValue: (obj["severity"] as? String) ?? "") ?? .unknown
+        let resetsAt = (obj["resets_at"] as? String).flatMap(Self.isoDate)
+        let isActive = (obj["is_active"] as? Bool) ?? false
+
+        var scopeLabel: String?
+        if let scope = obj["scope"] as? [String: Any],
+           let model = scope["model"] as? [String: Any],
+           let name = model["display_name"] as? String {
+            scopeLabel = name
+        }
+
+        let id = scopeLabel.map { "\(kind):\($0)" } ?? kind
+        return Quota(
+            id: id, group: group, kind: kind, scopeLabel: scopeLabel,
+            utilization: percent, resetsAt: resetsAt,
+            severity: severity, isActive: isActive
+        )
+    }
+
+    /// 구버전 응답(또는 `limits` 누락) 폴백: 알려진 최상위 키를 Quota로 매핑.
+    private static func parseLegacyQuotas(_ raw: [String: Any]) -> [Quota] {
+        let legacy: [(key: String, kind: String, group: Quota.Group, scope: String?)] = [
+            ("five_hour", "session", .session, nil),
+            ("seven_day", "weekly_all", .weekly, nil),
+            ("seven_day_opus", "weekly_scoped", .weekly, "Opus"),
+            ("seven_day_sonnet", "weekly_scoped", .weekly, "Sonnet"),
+            ("seven_day_omelette", "weekly_scoped", .weekly, "Design"),
+        ]
+        return legacy.compactMap { entry in
+            guard let obj = raw[entry.key] as? [String: Any],
+                  let utilization = obj["utilization"] as? Double else { return nil }
+            let resetsAt = (obj["resets_at"] as? String).flatMap(Self.isoDate)
+            let id = entry.scope.map { "\(entry.kind):\($0)" } ?? entry.kind
+            return Quota(
+                id: id, group: entry.group, kind: entry.kind, scopeLabel: entry.scope,
+                utilization: utilization, resetsAt: resetsAt,
+                severity: .unknown, isActive: false
+            )
+        }
     }
 
     /// ISO8601DateFormatter는 Sendable이 아니라서 static let 캐시는 strict concurrency에서 금지.

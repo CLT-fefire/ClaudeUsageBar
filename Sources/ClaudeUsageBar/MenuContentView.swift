@@ -1,9 +1,18 @@
 import SwiftUI
+import Charts
 
 struct MenuContentView: View {
     @ObservedObject var monitor: UsageMonitor
     @State private var launchAtLoginEnabled = LaunchAtLogin.isEnabled
     @State private var codeInput: String = ""
+
+    // 로컬 사용량 차트 토글/단위 (UserDefaults 영속). showLocalChart 키는 UsageMonitor와 공유.
+    @AppStorage(UsageMonitor.showLocalChartKey) private var showLocalChart = false
+    @AppStorage("localChartGranularity") private var granularityRaw = LocalChartGranularity.week.rawValue
+    private var granularity: LocalChartGranularity {
+        LocalChartGranularity(rawValue: granularityRaw) ?? .week
+    }
+    @State private var hoveredLabel: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,6 +31,7 @@ struct MenuContentView: View {
                                 secondaryCard(others)
                             }
                         }
+                        localUsageCard
                         controlsCard
                     } else {
                         authCard
@@ -351,6 +361,286 @@ struct MenuContentView: View {
         }
     }
 
+    // MARK: - Local Usage Card (로컬 로그 기반 · 공식 %와 별개)
+
+    @ViewBuilder
+    private var localUsageCard: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Label {
+                    Text("로컬 사용량 차트")
+                        .font(.system(size: 11, weight: .medium))
+                } icon: {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 10))
+                }
+                .foregroundStyle(.secondary)
+                if showLocalChart && monitor.isScanningLocal {
+                    ProgressView().controlSize(.mini)
+                }
+                Spacer()
+                Toggle("", isOn: $showLocalChart)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                    .onChange(of: showLocalChart) { _, on in
+                        if on { monitor.refreshLocalUsage() }
+                    }
+            }
+
+            if showLocalChart {
+                granularityPicker
+                localChartBody
+                localUsageFootnote
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var granularityPicker: some View {
+        HStack(spacing: 4) {
+            ForEach(LocalChartGranularity.allCases, id: \.self) { g in
+                let isSelected = granularity == g
+                Button {
+                    granularityRaw = g.rawValue
+                } label: {
+                    Text(g.label)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    isSelected
+                        ? .clear.tint(.accentColor.opacity(0.55)).interactive()
+                        : .clear.interactive(),
+                    in: Capsule()
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var localChartBody: some View {
+        if let data = monitor.localUsage {
+            let buckets = displayBuckets(data)
+            let totalOut = buckets.reduce(0) { $0 + $1.total }
+            if totalOut == 0 {
+                Text("이 기간 기록이 없습니다.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                localChart(buckets)
+                localSummary(buckets)
+            }
+        } else if monitor.isScanningLocal {
+            VStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("처음 1회 집계 중… 로그가 많으면 시간이 걸려요.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, minHeight: 80)
+        } else {
+            Text("집계를 불러오지 못했습니다.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, minHeight: 60)
+        }
+    }
+
+    private func localChart(_ buckets: [LocalChartBucket]) -> some View {
+        Chart {
+            ForEach(buckets) { b in
+                BarMark(
+                    x: .value("기간", b.label),
+                    y: .value("토큰", b.interactive)
+                )
+                .foregroundStyle(by: .value("출처", "대화형"))
+                .opacity(hoveredLabel == nil || hoveredLabel == b.label ? 1 : 0.4)
+                BarMark(
+                    x: .value("기간", b.label),
+                    y: .value("토큰", b.automation)
+                )
+                .foregroundStyle(by: .value("출처", "자동화"))
+                .opacity(hoveredLabel == nil || hoveredLabel == b.label ? 1 : 0.4)
+            }
+            if let h = hoveredLabel, let b = buckets.first(where: { $0.label == h }) {
+                RuleMark(x: .value("기간", h))
+                    .foregroundStyle(.white.opacity(0.12))
+                    .annotation(
+                        position: .top, alignment: .center, spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
+                    ) {
+                        barTooltip(b)
+                    }
+            }
+        }
+        .chartForegroundStyleScale(["대화형": Color.accentColor, "자동화": Color.orange])
+        .chartXScale(domain: buckets.map(\.label))
+        .chartLegend(position: .bottom, spacing: 2)
+        .chartXAxis {
+            AxisMarks { _ in
+                AxisValueLabel().font(.system(size: 8))
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisGridLine().foregroundStyle(.white.opacity(0.08))
+                AxisValueLabel {
+                    if let n = value.as(Double.self) {
+                        Text(compactTokens(Int(n))).font(.system(size: 8))
+                    }
+                }
+            }
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let pt):
+                            guard let plot = proxy.plotFrame else { return }
+                            let x = pt.x - geo[plot].origin.x
+                            hoveredLabel = proxy.value(atX: x, as: String.self)
+                        case .ended:
+                            hoveredLabel = nil
+                        }
+                    }
+            }
+        }
+        .frame(height: 130)
+    }
+
+    /// 막대 호버 시 표시되는 정확한 토큰/비용 툴팁.
+    private func barTooltip(_ b: LocalChartBucket) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(b.label)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+            Text("\(b.total.formatted()) 토큰")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+            HStack(spacing: 8) {
+                tooltipLegend(color: .accentColor, label: "대화형", value: b.interactive)
+                tooltipLegend(color: .orange, label: "자동화", value: b.automation)
+            }
+            Text("~\(compactCost(b.cost))")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tertiary)
+        }
+        .fixedSize()
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.12), lineWidth: 0.5)
+        )
+    }
+
+    private func tooltipLegend(color: Color, label: String, value: Int) -> some View {
+        HStack(spacing: 3) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(value.formatted()).font(.system(size: 9, weight: .semibold, design: .monospaced))
+        }
+    }
+
+    private func localSummary(_ buckets: [LocalChartBucket]) -> some View {
+        let totalOut = buckets.reduce(0) { $0 + $1.total }
+        let totalCost = buckets.reduce(0.0) { $0 + $1.cost }
+        let autoOut = buckets.reduce(0) { $0 + $1.automation }
+        let autoPct = totalOut > 0 ? Int((Double(autoOut) / Double(totalOut) * 100).rounded()) : 0
+        return HStack(spacing: 4) {
+            Text("최근 \(granularity.rangeLabel)")
+                .foregroundStyle(.secondary)
+            Text("·")
+                .foregroundStyle(.tertiary)
+            Text("\(compactTokens(totalOut)) 토큰")
+                .foregroundStyle(.primary)
+            Text("·")
+                .foregroundStyle(.tertiary)
+            Text("~\(compactCost(totalCost))")
+                .foregroundStyle(.primary)
+            Spacer()
+            Text("자동화 \(autoPct)%")
+                .foregroundStyle(.orange)
+        }
+        .font(.system(size: 10, weight: .medium, design: .monospaced))
+    }
+
+    private var localUsageFootnote: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 8))
+            Text("~/.claude 로그 기준 · 공식 한도(%)와 별개 · 비용은 추정")
+            Spacer()
+        }
+        .font(.system(size: 9))
+        .foregroundStyle(.tertiary)
+    }
+
+    /// 일별 집계를 선택한 단위(일/주/월)의 막대 버킷으로 롤업.
+    private func displayBuckets(_ data: LocalUsageReader.Data) -> [LocalChartBucket] {
+        let cal = Calendar.current
+        let gran = granularity
+        let comp: Calendar.Component = gran == .day ? .day : (gran == .week ? .weekOfYear : .month)
+        let count = gran.barCount
+
+        func start(_ d: Date) -> Date {
+            switch gran {
+            case .day:   return cal.startOfDay(for: d)
+            case .week:  return cal.dateInterval(of: .weekOfYear, for: d)?.start ?? cal.startOfDay(for: d)
+            case .month: return cal.dateInterval(of: .month, for: d)?.start ?? cal.startOfDay(for: d)
+            }
+        }
+
+        var map: [Date: (Int, Int, Double)] = [:]
+        for b in data.days {
+            let s = start(b.day)
+            var v = map[s] ?? (0, 0, 0)
+            v.0 += b.interactiveOutput; v.1 += b.automationOutput; v.2 += b.totalCost
+            map[s] = v
+        }
+
+        let cur = start(Date())
+        var result: [LocalChartBucket] = []
+        for i in stride(from: count - 1, through: 0, by: -1) {
+            guard let s = cal.date(byAdding: comp, value: -i, to: cur).map(start) else { continue }
+            let v = map[s] ?? (0, 0, 0)
+            result.append(LocalChartBucket(
+                id: count - 1 - i, label: bucketLabel(s),
+                interactive: v.0, automation: v.1, cost: v.2
+            ))
+        }
+        return result
+    }
+
+    private func bucketLabel(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ko_KR")
+        f.dateFormat = granularity == .month ? "M월" : "M/d"
+        return f.string(from: d)
+    }
+
+    private func compactTokens(_ n: Int) -> String {
+        let d = Double(n)
+        if d >= 1_000_000 { return String(format: "%.1fM", d / 1_000_000) }
+        if d >= 1_000 { return String(format: "%.0fK", d / 1_000) }
+        return "\(n)"
+    }
+
+    private func compactCost(_ c: Double) -> String {
+        if c >= 100 { return String(format: "$%.0f", c) }
+        if c >= 1 { return String(format: "$%.1f", c) }
+        return String(format: "$%.2f", c)
+    }
+
     // MARK: - Controls Card
 
     private var controlsCard: some View {
@@ -454,8 +744,9 @@ struct MenuContentView: View {
                             design: .monospaced
                         ))
                         .foregroundStyle(isSelected ? Color.white : Color.secondary)
-                        .frame(minWidth: 32, minHeight: 22)
+                        .frame(minWidth: 32, minHeight: 26)
                         .padding(.horizontal, 4)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .glassEffect(
@@ -514,4 +805,45 @@ struct MenuContentView: View {
         default: return .red
         }
     }
+}
+
+// MARK: - Local Chart Types
+
+enum LocalChartGranularity: String, CaseIterable {
+    case day, week, month
+
+    var label: String {
+        switch self {
+        case .day: return "일"
+        case .week: return "주"
+        case .month: return "월"
+        }
+    }
+
+    /// 표시할 막대 개수.
+    var barCount: Int {
+        switch self {
+        case .day: return 7
+        case .week: return 4
+        case .month: return 6
+        }
+    }
+
+    /// 요약줄에 쓰는 범위 표기.
+    var rangeLabel: String {
+        switch self {
+        case .day: return "7일"
+        case .week: return "4주"
+        case .month: return "6개월"
+        }
+    }
+}
+
+struct LocalChartBucket: Identifiable {
+    let id: Int
+    let label: String
+    let interactive: Int
+    let automation: Int
+    let cost: Double
+    var total: Int { interactive + automation }
 }

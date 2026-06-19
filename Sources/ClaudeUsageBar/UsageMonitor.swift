@@ -9,6 +9,16 @@ final class UsageMonitor: ObservableObject {
     @Published private(set) var isProbing: Bool = false
     @Published private(set) var lastUpdated: Date = .distantPast
 
+    /// 로컬 로그 기반 사용량(공식 API와 별개). 차트가 켜져 있을 때만 채워진다.
+    @Published private(set) var localUsage: LocalUsageReader.Data?
+    @Published private(set) var isScanningLocal: Bool = false
+
+    /// 차트 on/off 플래그. 뷰의 @AppStorage와 같은 UserDefaults 키를 공유한다.
+    static let showLocalChartKey = "showLocalChart"
+    private var isLocalChartEnabled: Bool {
+        UserDefaults.standard.bool(forKey: Self.showLocalChartKey)
+    }
+
     /// 자체 PKCE 로그인 기반 인증 상태. 자격증명 파일 존재 여부로 결정.
     @Published private(set) var isAuthenticated: Bool
     /// 로그인 흐름에서 브라우저를 열고 사용자 코드 입력을 기다리는 중인지.
@@ -77,11 +87,27 @@ final class UsageMonitor: ObservableObject {
             lastError = error.localizedDescription
         }
         lastUpdated = Date()
+        if isLocalChartEnabled { refreshLocalUsage() }
     }
 
     func manualRefresh() {
         Task { @MainActor in
             await refresh()
+        }
+    }
+
+    /// 로컬 로그를 백그라운드 스레드에서 스캔해 `localUsage`를 갱신.
+    /// 무거운 콜드 스캔도 메인 액터를 막지 않도록 detached로 돌린다.
+    func refreshLocalUsage() {
+        guard !isScanningLocal else { return }
+        isScanningLocal = true
+        Task { [weak self] in
+            let data = await Task.detached(priority: .utility) {
+                LocalUsageReader.scan()
+            }.value
+            guard let self else { return }
+            self.localUsage = data
+            self.isScanningLocal = false
         }
     }
 

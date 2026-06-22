@@ -66,7 +66,7 @@ struct MenuContentView: View {
             }
         }
         .overlay {
-            if theme.bgOverlay == .scanlines { Scanlines() }
+            if theme.bgOverlay == .scanlines { Scanlines(color: theme.palette.hairline) }
         }
     }
 
@@ -78,7 +78,7 @@ struct MenuContentView: View {
             if monitor.isAwaitingCode {
                 Text("브라우저에서 로그인한 뒤, 표시되는 인증 코드를 붙여넣으세요.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryStyle)
                     .fixedSize(horizontal: false, vertical: true)
 
                 TextField("인증 코드 붙여넣기", text: $codeInput)
@@ -125,7 +125,7 @@ struct MenuContentView: View {
                             .font(.system(size: 13, weight: .semibold))
                         Text("사용량을 보려면 Claude 계정으로 로그인하세요.")
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryStyle)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -227,6 +227,13 @@ struct MenuContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .themedHero(theme, tint: heroTintColor)
+        .overlay(alignment: .top) {
+            if let stripe = theme.heroStripe {
+                LinearGradient(colors: stripe, startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 3)
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2))
+            }
+        }
     }
 
     private var heroTintColor: Color? {
@@ -253,7 +260,7 @@ struct MenuContentView: View {
                     Text("현재 세션")
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.8)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryStyle)
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text("\(session.percentUsed)")
                             .font(.system(size: 44, weight: .bold, design: .rounded))
@@ -272,10 +279,10 @@ struct MenuContentView: View {
                         Text("리셋까지")
                             .font(.system(size: 9, weight: .bold))
                             .tracking(0.8)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryStyle)
                         Text(formatResetCompact(reset))
                             .font(.system(size: 15, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(theme.primaryStyle)
                     }
                 }
             }
@@ -303,10 +310,10 @@ struct MenuContentView: View {
                     Text("RESET IN")
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.8)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryStyle)
                     Text(formatResetCompact(reset))
                         .font(.system(size: 15, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(theme.primaryStyle)
                 }
             }
         }
@@ -326,7 +333,7 @@ struct MenuContentView: View {
                 if let reset = session.resetsAt {
                     Text("RESET \(formatResetCompact(reset))")
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryStyle)
                 }
             }
             Text(blockBar(session.percentUsed, cells: 20))
@@ -349,11 +356,11 @@ struct MenuContentView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("└─ SESSION UTIL")
                         .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryStyle)
                     if let reset = session.resetsAt {
                         Text("RESET \(formatResetCompact(reset))")
                             .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(theme.tertiaryStyle)
                     }
                 }
                 .padding(.top, 6)
@@ -372,7 +379,7 @@ struct MenuContentView: View {
                     Text("SESSION")
                         .font(.system(size: 9, weight: .bold))
                         .tracking(1)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryStyle)
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text("\(session.percentUsed)")
                             .font(.system(size: 42, weight: .bold))
@@ -389,7 +396,7 @@ struct MenuContentView: View {
                         Text("RESET IN")
                             .font(.system(size: 9, weight: .bold))
                             .tracking(0.8)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryStyle)
                         Text(formatResetCompact(reset))
                             .font(.system(size: 15, weight: .medium, design: .monospaced))
                     }
@@ -404,7 +411,7 @@ struct MenuContentView: View {
             ProgressView().controlSize(.small)
             Text("Claude 서버에서 조회 중…")
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryStyle)
         }
     }
 
@@ -418,7 +425,7 @@ struct MenuContentView: View {
                     .font(.system(size: 12, weight: .semibold))
                 Text(err)
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryStyle)
                     .fixedSize(horizontal: false, vertical: true)
                     .lineLimit(4)
             }
@@ -441,7 +448,7 @@ struct MenuContentView: View {
                     Spacer()
                 }
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(theme.tertiaryStyle)
             }
         }
         .padding(.horizontal, 14)
@@ -466,7 +473,7 @@ struct MenuContentView: View {
         HStack(spacing: 10) {
             Text(shortLabel(q))
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryStyle)
                 .frame(width: 80, alignment: .leading)
                 .lineLimit(1)
 
@@ -493,7 +500,7 @@ struct MenuContentView: View {
                     Image(systemName: "chart.bar.xaxis")
                         .font(.system(size: 10))
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryStyle)
                 if showLocalChart && monitor.isScanningLocal {
                     ProgressView().controlSize(.mini)
                 }
@@ -546,7 +553,7 @@ struct MenuContentView: View {
             if totalOut == 0 {
                 Text("이 기간 기록이 없습니다.")
                     .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(theme.tertiaryStyle)
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
                 localChart(buckets)
@@ -557,14 +564,14 @@ struct MenuContentView: View {
                 ProgressView().controlSize(.small)
                 Text("처음 1회 집계 중… 로그가 많으면 시간이 걸려요.")
                     .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(theme.tertiaryStyle)
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity, minHeight: 80)
         } else {
             Text("집계를 불러오지 못했습니다.")
                 .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(theme.tertiaryStyle)
                 .frame(maxWidth: .infinity, minHeight: 60)
         }
     }
@@ -637,7 +644,7 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(b.label)
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryStyle)
             Text("\(b.total.formatted()) 토큰")
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
             HStack(spacing: 8) {
@@ -646,7 +653,7 @@ struct MenuContentView: View {
             }
             Text("~\(compactCost(b.cost))")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(theme.tertiaryStyle)
         }
         .fixedSize()
         .padding(.horizontal, 9)
@@ -657,7 +664,7 @@ struct MenuContentView: View {
     private func tooltipLegend(color: Color, label: String, value: Int) -> some View {
         HStack(spacing: 3) {
             Circle().fill(color).frame(width: 6, height: 6)
-            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(label).font(.system(size: 9)).foregroundStyle(theme.secondaryStyle)
             Text(value.formatted()).font(.system(size: 9, weight: .semibold, design: .monospaced))
         }
     }
@@ -669,15 +676,15 @@ struct MenuContentView: View {
         let autoPct = totalOut > 0 ? Int((Double(autoOut) / Double(totalOut) * 100).rounded()) : 0
         return HStack(spacing: 4) {
             Text("최근 \(granularity.rangeLabel)")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryStyle)
             Text("·")
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(theme.tertiaryStyle)
             Text("\(compactTokens(totalOut)) 토큰")
-                .foregroundStyle(.primary)
+                .foregroundStyle(theme.primaryStyle)
             Text("·")
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(theme.tertiaryStyle)
             Text("~\(compactCost(totalCost))")
-                .foregroundStyle(.primary)
+                .foregroundStyle(theme.primaryStyle)
             Spacer()
             Text("자동화 \(autoPct)%")
                 .foregroundStyle(theme.palette.chartAutomation)
@@ -693,7 +700,7 @@ struct MenuContentView: View {
             Spacer()
         }
         .font(.system(size: 9))
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(theme.tertiaryStyle)
     }
 
     /// 일별 집계를 선택한 단위(일/주/월)의 막대 버킷으로 롤업.
@@ -764,7 +771,7 @@ struct MenuContentView: View {
                     Image(systemName: "timer")
                         .font(.system(size: 10))
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryStyle)
                 Spacer()
                 segmentedIntervalPicker
             }
@@ -780,7 +787,7 @@ struct MenuContentView: View {
                 Spacer()
             }
             .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(theme.tertiaryStyle)
 
             HStack(spacing: 8) {
                 Button {
@@ -825,7 +832,7 @@ struct MenuContentView: View {
             } icon: {
                 Image(systemName: "paintpalette").font(.system(size: 10))
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.secondaryStyle)
             Spacer()
             Picker("", selection: $selectedThemeRaw) {
                 ForEach(ThemeID.allCases, id: \.self) { id in
@@ -847,7 +854,7 @@ struct MenuContentView: View {
                 Image(systemName: "power.circle")
                     .font(.system(size: 10))
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.secondaryStyle)
             Spacer()
             Toggle("", isOn: $launchAtLoginEnabled)
                 .toggleStyle(.switch)

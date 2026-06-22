@@ -102,6 +102,13 @@ struct Theme {
     var forcesDark: Bool
     /// 루트에 1회 적용할 폰트 design(없으면 기존 혼합 유지). LiquidGlass = nil.
     var bodyFontDesign: Font.Design?
+    /// hero 카드 상단 그라디언트 띠(sun-stripe). Holo 전용.
+    var heroStripe: [Color]? = nil
+
+    /// 텍스트 계층 색 — 팔레트값 우선, 없으면 시스템 시맨틱.
+    var primaryStyle: AnyShapeStyle { palette.textPrimary.map(AnyShapeStyle.init) ?? AnyShapeStyle(.primary) }
+    var secondaryStyle: AnyShapeStyle { palette.textSecondary.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary) }
+    var tertiaryStyle: AnyShapeStyle { palette.textTertiary.map(AnyShapeStyle.init) ?? AnyShapeStyle(.tertiary) }
 
     func severityColor(_ severity: ClaudeUsageProbe.Quota.Severity, percent: Int) -> Color {
         switch severity {
@@ -158,7 +165,7 @@ enum ThemeID: String, CaseIterable {
                 surface: .glass,
                 heroGauge: .capsuleBar, quotaBar: .capsule,
                 frameOverlay: .none, bgOverlay: .none,
-                forcesDark: false, bodyFontDesign: nil
+                forcesDark: true, bodyFontDesign: nil
             )
 
         case .tacticalHUD:
@@ -179,7 +186,7 @@ enum ThemeID: String, CaseIterable {
                 ),
                 surface: .flat,
                 heroGauge: .radialRing, quotaBar: .segments,
-                frameOverlay: .cornerBrackets, bgOverlay: .none,
+                frameOverlay: .cornerBrackets, bgOverlay: .scanlines,
                 forcesDark: true, bodyFontDesign: .monospaced
             )
 
@@ -195,7 +202,7 @@ enum ThemeID: String, CaseIterable {
                     segmentSelectedText: Color(hex: 0x0B0F0B),
                     errorText: Color(hex: 0xFF3B30),
                     surfaceFill: Color(hex: 0x0B0F0B), surfaceStroke: Color(hex: 0x1E9E4A),
-                    textPrimary: green, textSecondary: nil, textTertiary: nil
+                    textPrimary: green, textSecondary: Color(hex: 0x2BBF55), textTertiary: Color(hex: 0x1E9E4A)
                 ),
                 surface: .flat,
                 heroGauge: .blockChars, quotaBar: .blockChars,
@@ -222,7 +229,8 @@ enum ThemeID: String, CaseIterable {
                 surface: .neonSlab,
                 heroGauge: .radialRing, quotaBar: .segments,
                 frameOverlay: .cornerBrackets, bgOverlay: .perspectiveGrid,
-                forcesDark: true, bodyFontDesign: nil
+                forcesDark: true, bodyFontDesign: nil,
+                heroStripe: [magenta, Color(hex: 0xFF8A3D)]
             )
 
         case .cyanotype:

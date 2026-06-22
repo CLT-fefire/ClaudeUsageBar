@@ -199,7 +199,8 @@ ClaudeUsageBar/
 │   ├── ClaudeUsageProbe.swift    # /api/oauth/usage HTTP 호출 + 파싱 + 갱신 연계
 │   ├── UsageMonitor.swift        # 폴링 타이머 + 상태 (ObservableObject)
 │   ├── LaunchAtLogin.swift       # SMAppService 로그인 시 자동 실행 토글
-│   └── MenuContentView.swift     # 메뉴 UI (Liquid Glass cards)
+│   ├── MenuContentView.swift     # 메뉴 UI (테마별 카드/게이지)
+│   └── Theme.swift               # 테마 시스템 (6종: 유리/HUD/터미널/홀로/청사진/메탈릭)
 ├── Resources/AppIcon.icns        # 앱 아이콘 (% 글리프 squircle)
 ├── scripts/make_icon.swift       # 아이콘 재생성 스크립트
 ├── make_app.sh                   # .app 번들 패키징 + 코드 서명
@@ -207,11 +208,11 @@ ClaudeUsageBar/
 └── Package.swift                 # SPM 매니페스트 (macOS 26+, Swift 6.2)
 ```
 
-총 8개 Swift 파일, ~600줄. 검토 5분이면 충분.
+총 9개 Swift 파일. 검토 10분이면 충분.
 
 ## 버전 / 로드맵
 
-최신: **v0.7.0** (2026-06-04) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
+최신: **v0.10.0** (2026-06-22) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
 
 - v0.1.0 — 메뉴바 % 표시 + 4개 quota 진행률
 - v0.2.0 — Liquid Glass 디자인 + 갱신 주기 설정
@@ -220,6 +221,9 @@ ClaudeUsageBar/
 - v0.5.0 — 독립 OAuth 로그인 전환 (공유 Keychain 의존 제거, 재인증 팝업 문제 해결)
 - v0.6.0 — **서명된 바이너리 배포 전환** (Dear U Developer ID 서명 + dmg를 GitHub Release로 배포)
 - v0.7.0 — 주간 리셋까지 남은 시간 표시 + 부정확한 "다음 갱신" 카운트다운 제거
+- v0.8.0 — 2026-06-15 세분화 제한 정책 반영 (limits 배열 데이터 주도 파싱)
+- v0.9.0 — 로컬 로그 기반 사용량 차트
+- v0.10.0 — **테마 시스템 (유리 · HUD · 터미널 · 홀로 · 청사진 · 메탈릭 6종)**
 
 ## 라이선스
 

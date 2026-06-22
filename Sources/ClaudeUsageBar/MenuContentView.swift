@@ -3,12 +3,14 @@ import Charts
 
 struct MenuContentView: View {
     @ObservedObject var monitor: UsageMonitor
+    @Environment(\.theme) private var theme
     @State private var launchAtLoginEnabled = LaunchAtLogin.isEnabled
     @State private var codeInput: String = ""
 
     // 로컬 사용량 차트 토글/단위 (UserDefaults 영속). showLocalChart 키는 UsageMonitor와 공유.
     @AppStorage(UsageMonitor.showLocalChartKey) private var showLocalChart = false
     @AppStorage("localChartGranularity") private var granularityRaw = LocalChartGranularity.week.rawValue
+    @AppStorage("selectedTheme") private var selectedThemeRaw = ThemeID.liquidGlass.rawValue
     private var granularity: LocalChartGranularity {
         LocalChartGranularity(rawValue: granularityRaw) ?? .week
     }
@@ -21,7 +23,7 @@ struct MenuContentView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 8)
 
-            GlassEffectContainer(spacing: 14) {
+            GlassEffectContainer(spacing: 8) {
                 VStack(spacing: 10) {
                     if monitor.isAuthenticated {
                         heroCard
@@ -43,6 +45,29 @@ struct MenuContentView: View {
             }
         }
         .frame(width: 360)
+        .tint(theme.palette.accent)
+        .background {
+            switch theme.surface {
+            case .glass:
+                GlassBackdrop()
+            case .blueprint:
+                ZStack {
+                    theme.palette.surfaceFill
+                    if theme.bgOverlay == .draftingGrid {
+                        DraftingGrid(color: theme.palette.hairline)
+                    }
+                }
+            case .metal:
+                Color(hex: 0x15181C)
+            default:
+                if theme.bgOverlay == .perspectiveGrid {
+                    PerspectiveGrid(color: theme.palette.hairline)
+                }
+            }
+        }
+        .overlay {
+            if theme.bgOverlay == .scanlines { Scanlines() }
+        }
     }
 
     // MARK: - Auth Card
@@ -64,7 +89,7 @@ struct MenuContentView: View {
                 if let err = monitor.loginError {
                     Text(err)
                         .font(.system(size: 11))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(theme.palette.errorText)
                         .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(3)
                 }
@@ -76,7 +101,7 @@ struct MenuContentView: View {
                     } label: {
                         Text("취소").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glass)
+                    .themedButton(theme)
                     .controlSize(.regular)
 
                     Button {
@@ -85,7 +110,7 @@ struct MenuContentView: View {
                         Label("확인", systemImage: "checkmark")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glass)
+                    .themedButton(theme, prominent: true)
                     .controlSize(.regular)
                     .keyboardShortcut(.defaultAction)
                     .disabled(codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -108,7 +133,7 @@ struct MenuContentView: View {
                 if let err = monitor.loginError {
                     Text(err)
                         .font(.system(size: 11))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(theme.palette.errorText)
                         .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(3)
                 }
@@ -119,13 +144,13 @@ struct MenuContentView: View {
                     Label("Claude 로그인", systemImage: "arrow.up.forward.app")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
+                .themedButton(theme, prominent: true)
                 .controlSize(.regular)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 16))
+        .themedCard(theme, radius: Metrics.cardLarge)
     }
 
     private func submitCode() {
@@ -138,6 +163,7 @@ struct MenuContentView: View {
     private var appControlsCard: some View {
         VStack(spacing: 12) {
             launchAtLoginRow
+            themeRow
             HStack(spacing: 8) {
                 Button {
                     NSApplication.shared.terminate(nil)
@@ -145,14 +171,14 @@ struct MenuContentView: View {
                     Label("종료", systemImage: "power")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
+                .themedButton(theme)
                 .controlSize(.regular)
                 .keyboardShortcut("q", modifiers: .command)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
+        .themedCard(theme, radius: Metrics.cardMedium)
     }
 
     // MARK: - Title Bar
@@ -182,7 +208,7 @@ struct MenuContentView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .foregroundStyle(.tint)
-            .glassEffect(.clear.tint(.accentColor.opacity(0.12)), in: Capsule())
+            .themedBadge(theme)
     }
 
     // MARK: - Hero Card
@@ -200,19 +226,27 @@ struct MenuContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .glassEffect(heroGlass, in: RoundedRectangle(cornerRadius: 16))
+        .themedHero(theme, tint: heroTintColor)
     }
 
-    private var heroGlass: Glass {
-        if let session = monitor.snapshot?.session {
-            // .clear + 매우 옅은 tint로 진짜 유리처럼 뒷배경이 비치게.
-            return .clear.tint(barColor(session).opacity(0.10))
-        }
-        return .clear
+    private var heroTintColor: Color? {
+        guard let session = monitor.snapshot?.session else { return nil }
+        return theme.severityColor(session.severity, percent: session.percentUsed)
     }
 
     @ViewBuilder
     private func heroContent(_ session: ClaudeUsageProbe.Quota) -> some View {
+        switch theme.heroGauge {
+        case .radialRing: tacticalHero(session)
+        case .blockChars: phosphorHero(session)
+        case .blueprintDimension: blueprintHero(session)
+        case .embossedBar: metalHero(session)
+        case .capsuleBar: heroContentGlass(session)
+        }
+    }
+
+    @ViewBuilder
+    private func heroContentGlass(_ session: ClaudeUsageProbe.Quota) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -250,25 +284,119 @@ struct MenuContentView: View {
     }
 
     private func heroProgressBar(_ session: ClaudeUsageProbe.Quota) -> some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.white.opacity(0.12))
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                barColor(session),
-                                barColor(session).opacity(0.7)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: max(2, geo.size.width * CGFloat(session.percentUsed) / 100))
+        themedHeroGauge(theme, percent: session.percentUsed, color: barColor(session))
+    }
+
+    /// Tactical/Holo hero: 라디얼 게이지 링(중앙 숫자) + 우측 리셋 readout.
+    @ViewBuilder
+    private func tacticalHero(_ session: ClaudeUsageProbe.Quota) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            RadialGauge(
+                percent: session.percentUsed,
+                color: barColor(session),
+                track: theme.palette.hairline.opacity(0.15),
+                gradient: theme.palette.ringGradient
+            )
+            Spacer()
+            if let reset = session.resetsAt {
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("RESET IN")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(.secondary)
+                    Text(formatResetCompact(reset))
+                        .font(.system(size: 15, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.primary)
+                }
             }
         }
-        .frame(height: 7)
+    }
+
+    /// PHOSPHOR hero: 큰 모노 숫자 + 블링킹 커서 + 블록 게이지.
+    @ViewBuilder
+    private func phosphorHero(_ session: ClaudeUsageProbe.Quota) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(session.percentUsed)%")
+                    .font(.system(size: 38, weight: .bold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(barColor(session))
+                BlinkingCursor(color: barColor(session))
+                Spacer()
+                if let reset = session.resetsAt {
+                    Text("RESET \(formatResetCompact(reset))")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(blockBar(session.percentUsed, cells: 20))
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundStyle(barColor(session))
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+        }
+    }
+
+    /// Cyanotype hero: 큰 도면 숫자 + leader 주석 + 치수선 게이지.
+    @ViewBuilder
+    private func blueprintHero(_ session: ClaudeUsageProbe.Quota) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 8) {
+                Text("\(session.percentUsed)")
+                    .font(.system(size: 44, weight: .bold, design: .monospaced))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("└─ SESSION UTIL")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                    if let reset = session.resetsAt {
+                        Text("RESET \(formatResetCompact(reset))")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.top, 6)
+                Spacer()
+            }
+            DimensionLine(percent: session.percentUsed, color: barColor(session), track: theme.palette.hairline)
+        }
+    }
+
+    /// Titanium hero: emboss 각인 숫자 + 음각/볼록 금속 게이지.
+    @ViewBuilder
+    private func metalHero(_ session: ClaudeUsageProbe.Quota) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("SESSION")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text("\(session.percentUsed)")
+                            .font(.system(size: 42, weight: .bold))
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                        Text("%")
+                            .font(.system(size: 22, weight: .semibold))
+                    }
+                    .embossText()
+                }
+                Spacer()
+                if let reset = session.resetsAt {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("RESET IN")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundStyle(.secondary)
+                        Text(formatResetCompact(reset))
+                            .font(.system(size: 15, weight: .medium, design: .monospaced))
+                    }
+                }
+            }
+            EmbossedGauge(percent: session.percentUsed, color: barColor(session), height: 12)
+        }
     }
 
     private var loadingContent: some View {
@@ -284,7 +412,7 @@ struct MenuContentView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 20))
-                .foregroundStyle(.orange)
+                .foregroundStyle(theme.palette.warning)
             VStack(alignment: .leading, spacing: 3) {
                 Text("조회 실패")
                     .font(.system(size: 12, weight: .semibold))
@@ -305,7 +433,7 @@ struct MenuContentView: View {
                 secondaryRow(quota)
             }
             if let reset = weeklyResetDate(quotas) {
-                Divider().opacity(0.4)
+                Divider().opacity(Metrics.dividerOpacity)
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 9))
@@ -319,7 +447,7 @@ struct MenuContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
-        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
+        .themedCard(theme, radius: Metrics.cardMedium)
     }
 
     /// 주간 quota들의 대표 리셋 시각. 7일 윈도우는 공통이므로 `weekly_all`을
@@ -342,16 +470,7 @@ struct MenuContentView: View {
                 .frame(width: 80, alignment: .leading)
                 .lineLimit(1)
 
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.white.opacity(0.08))
-                    Capsule()
-                        .fill(barColor(q))
-                        .frame(width: max(2, geo.size.width * CGFloat(q.percentUsed) / 100))
-                }
-            }
-            .frame(height: 4)
+            themedQuotaBar(theme, percent: q.percentUsed, color: barColor(q))
 
             Text("\(q.percentUsed)%")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -397,7 +516,7 @@ struct MenuContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
-        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
+        .themedCard(theme, radius: Metrics.cardMedium)
     }
 
     private var granularityPicker: some View {
@@ -409,17 +528,12 @@ struct MenuContentView: View {
                 } label: {
                     Text(g.label)
                         .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                        .foregroundStyle(isSelected ? theme.palette.segmentSelectedText : Color.secondary)
                         .frame(maxWidth: .infinity, minHeight: 30)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .glassEffect(
-                    isSelected
-                        ? .clear.tint(.accentColor.opacity(0.55)).interactive()
-                        : .clear.interactive(),
-                    in: Capsule()
-                )
+                .themedSegment(theme, selected: isSelected)
             }
         }
     }
@@ -463,17 +577,17 @@ struct MenuContentView: View {
                     y: .value("토큰", b.interactive)
                 )
                 .foregroundStyle(by: .value("출처", "대화형"))
-                .opacity(hoveredLabel == nil || hoveredLabel == b.label ? 1 : 0.4)
+                .opacity(hoveredLabel == nil || hoveredLabel == b.label ? 1 : Metrics.chartDimmed)
                 BarMark(
                     x: .value("기간", b.label),
                     y: .value("토큰", b.automation)
                 )
                 .foregroundStyle(by: .value("출처", "자동화"))
-                .opacity(hoveredLabel == nil || hoveredLabel == b.label ? 1 : 0.4)
+                .opacity(hoveredLabel == nil || hoveredLabel == b.label ? 1 : Metrics.chartDimmed)
             }
             if let h = hoveredLabel, let b = buckets.first(where: { $0.label == h }) {
                 RuleMark(x: .value("기간", h))
-                    .foregroundStyle(.white.opacity(0.12))
+                    .foregroundStyle(theme.palette.hairline.opacity(Metrics.chartRule))
                     .annotation(
                         position: .top, alignment: .center, spacing: 2,
                         overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
@@ -482,7 +596,7 @@ struct MenuContentView: View {
                     }
             }
         }
-        .chartForegroundStyleScale(["대화형": Color.accentColor, "자동화": Color.orange])
+        .chartForegroundStyleScale(["대화형": theme.palette.chartInteractive, "자동화": theme.palette.chartAutomation])
         .chartXScale(domain: buckets.map(\.label))
         .chartLegend(position: .bottom, spacing: 2)
         .chartXAxis {
@@ -492,7 +606,7 @@ struct MenuContentView: View {
         }
         .chartYAxis {
             AxisMarks(position: .leading) { value in
-                AxisGridLine().foregroundStyle(.white.opacity(0.08))
+                AxisGridLine().foregroundStyle(theme.palette.hairline.opacity(Metrics.chartGrid))
                 AxisValueLabel {
                     if let n = value.as(Double.self) {
                         Text(compactTokens(Int(n))).font(.system(size: 8))
@@ -527,8 +641,8 @@ struct MenuContentView: View {
             Text("\(b.total.formatted()) 토큰")
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
             HStack(spacing: 8) {
-                tooltipLegend(color: .accentColor, label: "대화형", value: b.interactive)
-                tooltipLegend(color: .orange, label: "자동화", value: b.automation)
+                tooltipLegend(color: theme.palette.chartInteractive, label: "대화형", value: b.interactive)
+                tooltipLegend(color: theme.palette.chartAutomation, label: "자동화", value: b.automation)
             }
             Text("~\(compactCost(b.cost))")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -537,10 +651,7 @@ struct MenuContentView: View {
         .fixedSize()
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.12), lineWidth: 0.5)
-        )
+        .themedTooltip(theme)
     }
 
     private func tooltipLegend(color: Color, label: String, value: Int) -> some View {
@@ -569,7 +680,7 @@ struct MenuContentView: View {
                 .foregroundStyle(.primary)
             Spacer()
             Text("자동화 \(autoPct)%")
-                .foregroundStyle(.orange)
+                .foregroundStyle(theme.palette.chartAutomation)
         }
         .font(.system(size: 10, weight: .medium, design: .monospaced))
     }
@@ -660,6 +771,8 @@ struct MenuContentView: View {
 
             launchAtLoginRow
 
+            themeRow
+
             HStack(spacing: 0) {
                 Image(systemName: "clock")
                     .font(.system(size: 9))
@@ -676,7 +789,7 @@ struct MenuContentView: View {
                     Label("새로고침", systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
+                .themedButton(theme, prominent: true)
                 .controlSize(.regular)
                 .keyboardShortcut("r", modifiers: .command)
 
@@ -686,7 +799,7 @@ struct MenuContentView: View {
                     Label("로그아웃", systemImage: "rectangle.portrait.and.arrow.right")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
+                .themedButton(theme)
                 .controlSize(.regular)
 
                 Button {
@@ -695,14 +808,34 @@ struct MenuContentView: View {
                     Label("종료", systemImage: "power")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
+                .themedButton(theme)
                 .controlSize(.regular)
                 .keyboardShortcut("q", modifiers: .command)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14))
+        .themedCard(theme, radius: Metrics.cardMedium)
+    }
+
+    private var themeRow: some View {
+        HStack(spacing: 8) {
+            Label {
+                Text("테마").font(.system(size: 11, weight: .medium))
+            } icon: {
+                Image(systemName: "paintpalette").font(.system(size: 10))
+            }
+            .foregroundStyle(.secondary)
+            Spacer()
+            Picker("", selection: $selectedThemeRaw) {
+                ForEach(ThemeID.allCases, id: \.self) { id in
+                    Text(id.label).tag(id.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .controlSize(.small)
+        }
     }
 
     private var launchAtLoginRow: some View {
@@ -743,18 +876,13 @@ struct MenuContentView: View {
                             weight: isSelected ? .semibold : .medium,
                             design: .monospaced
                         ))
-                        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                        .foregroundStyle(isSelected ? theme.palette.segmentSelectedText : Color.secondary)
                         .frame(minWidth: 32, minHeight: 26)
                         .padding(.horizontal, 4)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .glassEffect(
-                    isSelected
-                        ? .clear.tint(.accentColor.opacity(0.55)).interactive()
-                        : .clear.interactive(),
-                    in: Capsule()
-                )
+                .themedSegment(theme, selected: isSelected)
             }
         }
     }
@@ -791,19 +919,11 @@ struct MenuContentView: View {
     /// 색상은 서버 severity를 우선 반영하고(warning/critical), normal·unknown이면
     /// 퍼센트 임계값으로 폴백한다. (서버가 낮은 %에서도 critical을 줄 수 있으므로)
     private func barColor(_ q: ClaudeUsageProbe.Quota) -> Color {
-        switch q.severity {
-        case .critical: return .red
-        case .warning: return .orange
-        case .normal, .unknown: return barColor(q.percentUsed)
-        }
+        theme.severityColor(q.severity, percent: q.percentUsed)
     }
 
     private func barColor(_ pct: Int) -> Color {
-        switch pct {
-        case ..<60: return .green
-        case ..<85: return .orange
-        default: return .red
-        }
+        theme.percentColor(pct)
     }
 }
 

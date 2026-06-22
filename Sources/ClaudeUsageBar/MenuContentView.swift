@@ -336,11 +336,7 @@ struct MenuContentView: View {
                         .foregroundStyle(theme.secondaryStyle)
                 }
             }
-            Text(blockBar(session.percentUsed, cells: 20))
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(barColor(session))
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
+            BlockBar(percent: session.percentUsed, color: barColor(session), fontSize: 13)
         }
     }
 

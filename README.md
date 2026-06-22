@@ -212,7 +212,7 @@ ClaudeUsageBar/
 
 ## 버전 / 로드맵
 
-최신: **v0.10.1** (2026-06-22) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
+최신: **v0.10.2** (2026-06-22) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
 
 - v0.1.0 — 메뉴바 % 표시 + 4개 quota 진행률
 - v0.2.0 — Liquid Glass 디자인 + 갱신 주기 설정
@@ -225,6 +225,7 @@ ClaudeUsageBar/
 - v0.9.0 — 로컬 로그 기반 사용량 차트
 - v0.10.0 — **테마 시스템 (유리 · HUD · 터미널 · 홀로 · 청사진 · 메탈릭 6종)**
 - v0.10.1 — 테마 폴리시 (전 테마 다크 고정, 홀로 sun-stripe, 터미널 green 텍스트 전면, HUD 스캔라인, 테마별 텍스트 계층색)
+- v0.10.2 — 터미널 블록 게이지가 가용 폭을 꽉 채우도록 수정 (동적 셀 수)
 
 ## 라이선스
 

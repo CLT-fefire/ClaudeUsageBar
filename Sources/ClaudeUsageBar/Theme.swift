@@ -302,6 +302,25 @@ func blockBar(_ percent: Int, cells: Int) -> String {
     return "[" + String(repeating: "█", count: filled) + String(repeating: "░", count: cells - filled) + "]"
 }
 
+/// 가용 폭을 꽉 채우는 블록문자 게이지 — 폭에 맞춰 셀 수를 동적 산정(끝에서 끝까지).
+struct BlockBar: View {
+    let percent: Int
+    let color: Color
+    var fontSize: CGFloat = 11
+    var body: some View {
+        GeometryReader { geo in
+            let cells = max(4, Int(geo.size.width / (fontSize * 0.6)) - 2)  // SF Mono advance ≈ 0.6em, 양끝 대괄호 2칸
+            Text(blockBar(percent, cells: cells))
+                .font(.system(size: fontSize, weight: .medium, design: .monospaced))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: fontSize + 3)
+    }
+}
+
 // MARK: - 표면(surface) 모디파이어
 
 extension View {
@@ -528,11 +547,7 @@ func themedQuotaBar(_ t: Theme, percent: Int, color: Color) -> some View {
         }
         .frame(height: Metrics.heroTrackHeight)
     case .blockChars:
-        Text(blockBar(percent, cells: 12))
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .minimumScaleFactor(0.5)
+        BlockBar(percent: percent, color: color)
     case .dimension:
         DimensionLine(percent: percent, color: color, track: t.palette.hairline)
     case .embossedBar:

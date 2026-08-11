@@ -647,6 +647,9 @@ struct MenuContentView: View {
                 tooltipLegend(color: theme.palette.chartInteractive, label: "대화형", value: b.interactive)
                 tooltipLegend(color: theme.palette.chartAutomation, label: "자동화", value: b.automation)
             }
+            Text("출력 \(compactTokens(b.output)) · 캐시읽기 \(compactTokens(b.cached))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(theme.secondaryStyle)
             Text("~\(compactCost(b.cost))")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundStyle(theme.tertiaryStyle)
@@ -692,7 +695,7 @@ struct MenuContentView: View {
         HStack(spacing: 4) {
             Image(systemName: "info.circle")
                 .font(.system(size: 8))
-            Text("~/.claude 로그 기준 · 공식 한도(%)와 별개 · 비용은 추정")
+            Text("~/.claude 로그 기준 · 입력+출력+캐시 합산 · 공식 한도(%)와 별개 · 비용은 추정")
             Spacer()
         }
         .font(.system(size: 9))
@@ -714,11 +717,16 @@ struct MenuContentView: View {
             }
         }
 
-        var map: [Date: (Int, Int, Double)] = [:]
+        struct Roll { var interactive = 0, automation = 0, output = 0, cached = 0; var cost = 0.0 }
+        var map: [Date: Roll] = [:]
         for b in data.days {
             let s = start(b.day)
-            var v = map[s] ?? (0, 0, 0)
-            v.0 += b.interactiveOutput; v.1 += b.automationOutput; v.2 += b.totalCost
+            var v = map[s] ?? Roll()
+            v.interactive += b.interactive.total
+            v.automation += b.automation.total
+            v.output += b.totalOutput
+            v.cached += b.interactive.cacheRead + b.automation.cacheRead
+            v.cost += b.totalCost
             map[s] = v
         }
 
@@ -726,10 +734,11 @@ struct MenuContentView: View {
         var result: [LocalChartBucket] = []
         for i in stride(from: count - 1, through: 0, by: -1) {
             guard let s = cal.date(byAdding: comp, value: -i, to: cur).map(start) else { continue }
-            let v = map[s] ?? (0, 0, 0)
+            let v = map[s] ?? Roll()
             result.append(LocalChartBucket(
                 id: count - 1 - i, label: bucketLabel(s),
-                interactive: v.0, automation: v.1, cost: v.2
+                interactive: v.interactive, automation: v.automation,
+                output: v.output, cached: v.cached, cost: v.cost
             ))
         }
         return result
@@ -962,11 +971,15 @@ enum LocalChartGranularity: String, CaseIterable {
     }
 }
 
+/// 막대 하나 분량의 롤업. `interactive`/`automation`은 입력+출력+캐시를 합친 **총 토큰**이고,
+/// `output`/`cached`는 툴팁에서 내역을 보여주기 위한 세부값이다.
 struct LocalChartBucket: Identifiable {
     let id: Int
     let label: String
     let interactive: Int
     let automation: Int
+    let output: Int
+    let cached: Int
     let cost: Double
     var total: Int { interactive + automation }
 }

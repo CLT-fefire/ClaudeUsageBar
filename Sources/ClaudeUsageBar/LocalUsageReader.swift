@@ -1,29 +1,51 @@
 import Foundation
 
 /// `~/.claude/projects/**/*.jsonl` (Claude Code 세션 로그)를 읽어
-/// 날짜별 output 토큰·추정 비용을 **출처별**(대화형 vs 자동화)로 집계한다.
+/// 날짜별 토큰·추정 비용을 **출처별**(대화형 vs 자동화)로 집계한다.
 ///
 /// - 공식 사용량 API(%)와는 완전히 별개인 **로컬 추정치**다.
-/// - 출처 구분 기준: `entrypoint`.
-///   - `sdk-cli` → 자동화(headless: claude-mem 옵저버, Agent SDK, `claude -p` 등)
-///   - `claude-desktop` / `claude-vscode` / `cli` / 기타 → 대화형
+/// - 토큰은 input + output + cache write/read를 **모두** 합산한다.
+///   (output만 세면 실제 소비량의 1% 미만만 보인다.)
+/// - 출처 구분 기준:
+///   - `/subagents/` 경로 → 자동화 (Task 에이전트·워크플로우 실행. 이 파일들의
+///     `entrypoint`는 부모 세션 값을 그대로 물려받아 식별자로 쓸 수 없다.)
+///   - `entrypoint == sdk-cli` → 자동화(headless: Agent SDK, `claude -p` 등)
+///   - 그 외(`claude-desktop` / `claude-vscode` / `cli` …) → 대화형
 ///   (`promptSource`는 전송 방식일 뿐 대화형까지 sdk로 찍혀 식별자로 쓸 수 없음)
-/// - 서브에이전트 파일(`/subagents/`)은 부모 귀속이 모호해 제외한다.
+/// - **중복 제거 필수**: 하나의 assistant 메시지는 content block(text/tool_use) 수만큼
+///   별도 라인으로 기록되고 각 라인이 동일한 usage 전체값을 복제한다. `message.id`
+///   기준으로 첫 라인만 집계하지 않으면 블록 수만큼 곱해진다(실측 2.6배 과대).
 /// - 비용은 모델 단가 하드코딩 기반 **추정**이며 캐시 토큰까지 포함한다.
 enum LocalUsageReader {
 
     enum Source { case interactive, automation }
 
-    /// 하루치 집계 (출처별 output 토큰 + 추정 비용 USD).
+    /// 토큰 내역. `total`이 차트에 쓰는 실사용량.
+    struct Tally: Sendable, Equatable, Codable {
+        var input = 0
+        var output = 0
+        var cacheWrite = 0
+        var cacheRead = 0
+
+        var total: Int { input + output + cacheWrite + cacheRead }
+
+        static func += (lhs: inout Tally, rhs: Tally) {
+            lhs.input += rhs.input; lhs.output += rhs.output
+            lhs.cacheWrite += rhs.cacheWrite; lhs.cacheRead += rhs.cacheRead
+        }
+    }
+
+    /// 하루치 집계 (출처별 토큰 내역 + 추정 비용 USD).
     struct DayBucket: Sendable, Equatable, Identifiable {
         let day: Date          // 로컬 자정 기준 날짜
-        let interactiveOutput: Int
-        let automationOutput: Int
+        let interactive: Tally
+        let automation: Tally
         let interactiveCost: Double
         let automationCost: Double
 
         var id: Date { day }
-        var totalOutput: Int { interactiveOutput + automationOutput }
+        var totalTokens: Int { interactive.total + automation.total }
+        var totalOutput: Int { interactive.output + automation.output }
         var totalCost: Double { interactiveCost + automationCost }
     }
 
@@ -63,7 +85,6 @@ enum LocalUsageReader {
 
         for case let url as URL in enumerator {
             guard url.pathExtension == "jsonl" else { continue }
-            if url.path.contains("/subagents/") { continue }
             guard let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                   rv.isRegularFile == true,
                   let mtime = rv.contentModificationDate else { continue }
@@ -84,11 +105,11 @@ enum LocalUsageReader {
         saveCache(cache)
 
         // 파일별 일 집계를 날짜 기준으로 합산
-        var merged: [String: (iOut: Int, aOut: Int, iCost: Double, aCost: Double)] = [:]
+        var merged: [String: DayAgg] = [:]
         for entry in current.values {
             for (day, a) in entry.days {
-                var m = merged[day] ?? (0, 0, 0, 0)
-                m.iOut += a.iOut; m.aOut += a.aOut; m.iCost += a.iCost; m.aCost += a.aCost
+                var m = merged[day] ?? DayAgg()
+                m.i += a.i; m.a += a.a; m.iCost += a.iCost; m.aCost += a.aCost
                 merged[day] = m
             }
         }
@@ -99,7 +120,7 @@ enum LocalUsageReader {
             guard let d = dayFmt.date(from: day) else { continue }
             buckets.append(DayBucket(
                 day: d,
-                interactiveOutput: m.iOut, automationOutput: m.aOut,
+                interactive: m.i, automation: m.a,
                 interactiveCost: m.iCost, automationCost: m.aCost
             ))
         }
@@ -115,8 +136,12 @@ enum LocalUsageReader {
     ) -> FileEntry? {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
 
+        // 서브에이전트 로그는 entrypoint가 부모 세션 값이라 경로로 판정한다.
+        let isSubagent = url.path.contains("/subagents/")
+
         var days: [String: DayAgg] = [:]
-        var source: Source?
+        var source: Source? = isSubagent ? .automation : nil
+        var seenMessages = Set<String>()   // content block 분할 라인 중복 제거
 
         for sub in content.split(separator: "\n", omittingEmptySubsequences: true) {
             // 빠른 사전 필터: 관심 있는 라인만 JSON 파싱
@@ -132,24 +157,28 @@ enum LocalUsageReader {
                   let msg = obj["message"] as? [String: Any],
                   let usage = msg["usage"] as? [String: Any] else { continue }
 
-            let out = intValue(usage["output_tokens"])
-            let inp = intValue(usage["input_tokens"])
-            let cw  = intValue(usage["cache_creation_input_tokens"])
-            let cr  = intValue(usage["cache_read_input_tokens"])
+            // 같은 message.id의 두 번째 라인부터는 usage 복제본이므로 버린다.
+            if let mid = msg["id"] as? String, !seenMessages.insert(mid).inserted { continue }
+
+            var t = Tally()
+            t.input      = intValue(usage["input_tokens"])
+            t.output     = intValue(usage["output_tokens"])
+            t.cacheWrite = intValue(usage["cache_creation_input_tokens"])
+            t.cacheRead  = intValue(usage["cache_read_input_tokens"])
             let model = (msg["model"] as? String) ?? ""
             guard let tsStr = obj["timestamp"] as? String,
                   let ts = isoFrac.date(from: tsStr) ?? isoPlain.date(from: tsStr) else { continue }
 
             let key = dayFmt.string(from: ts)
             let p = price(for: model)
-            let cost = Double(inp) * p.input + Double(out) * p.output
-                     + Double(cw) * p.cacheWrite + Double(cr) * p.cacheRead
+            let cost = Double(t.input) * p.input + Double(t.output) * p.output
+                     + Double(t.cacheWrite) * p.cacheWrite + Double(t.cacheRead) * p.cacheRead
 
             var a = days[key] ?? DayAgg()
             if (source ?? .interactive) == .automation {
-                a.aOut += out; a.aCost += cost
+                a.a += t; a.aCost += cost
             } else {
-                a.iOut += out; a.iCost += cost
+                a.i += t; a.iCost += cost
             }
             days[key] = a
         }
@@ -182,7 +211,7 @@ enum LocalUsageReader {
     // MARK: - 캐시 (파일 mtime 기준 증분 파싱)
 
     private struct DayAgg: Codable {
-        var iOut = 0, aOut = 0
+        var i = Tally(), a = Tally()
         var iCost = 0.0, aCost = 0.0
     }
     private struct FileEntry: Codable {
@@ -193,7 +222,8 @@ enum LocalUsageReader {
         var version = cacheVersion
         var files: [String: FileEntry] = [:]
     }
-    private static let cacheVersion = 1
+    /// 2: Tally(전 항목 토큰) 스키마 + message.id 중복 제거 + subagents 포함.
+    private static let cacheVersion = 2
 
     private static var cacheURL: URL {
         FileManager.default.homeDirectoryForCurrentUser

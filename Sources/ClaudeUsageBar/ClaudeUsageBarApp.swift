@@ -18,7 +18,12 @@ struct ClaudeUsageBarApp: App {
                 .appForeground(theme.palette.textPrimary)
                 .preferredColorScheme(theme.forcesDark ? .dark : nil)
         } label: {
-            Text(monitor.statusBarText)
+            // `isHealthy` 가 아니라 `hasOutage` 인 이유: 예정된 점검이나 미지 상태로
+            // 경고가 뜨면 오탐이고, 오탐 한 번이 다음 진짜 경보의 신뢰를 깎는다.
+            MenuBarLabel(
+                text: monitor.statusBarText,
+                hasOutage: monitor.status?.hasOutage == true
+            )
         }
         .menuBarExtraStyle(.window)
     }

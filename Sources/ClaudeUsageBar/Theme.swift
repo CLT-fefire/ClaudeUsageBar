@@ -125,6 +125,18 @@ struct Theme {
         default: return palette.critical
         }
     }
+
+    /// 서비스 상태 심각도 → 색. quota용 severity 팔레트를 그대로 재사용하므로
+    /// 테마별 정의를 새로 추가할 필요가 없다.
+    func statusColor(_ indicator: StatusProbe.Indicator) -> Color {
+        switch indicator {
+        case .allClear: return palette.normal
+        case .minor: return palette.warning
+        case .major, .critical: return palette.critical
+        case .maintenance: return palette.accent
+        case .unknown: return palette.hairline
+        }
+    }
 }
 
 // MARK: - ThemeID + factory

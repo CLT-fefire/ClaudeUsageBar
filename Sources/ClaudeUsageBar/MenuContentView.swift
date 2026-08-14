@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import AppKit
 
 struct MenuContentView: View {
     @ObservedObject var monitor: UsageMonitor
@@ -11,10 +12,27 @@ struct MenuContentView: View {
     @AppStorage(UsageMonitor.showLocalChartKey) private var showLocalChart = false
     @AppStorage("localChartGranularity") private var granularityRaw = LocalChartGranularity.week.rawValue
     @AppStorage("selectedTheme") private var selectedThemeRaw = ThemeID.liquidGlass.rawValue
+    @AppStorage(UsageMonitor.showServiceStatusKey) private var showServiceStatus = true
     private var granularity: LocalChartGranularity {
         LocalChartGranularity(rawValue: granularityRaw) ?? .week
     }
     @State private var hoveredLabel: String?
+    /// 서비스 상태 카드에서 컴포넌트 전체 목록을 펼쳤는지.
+    @State private var statusExpanded = false
+
+    /// 상태를 아직 못 받았으면 "정상"으로 취급 — 조회 실패가 가짜 장애로 보이면 안 된다.
+    private var statusIsHealthy: Bool { monitor.status?.isHealthy ?? true }
+
+    @ViewBuilder
+    private var statusCard: some View {
+        if let snap = monitor.status {
+            StatusCard(snapshot: snap, failed: monitor.statusFailed, expanded: $statusExpanded)
+        } else if monitor.statusFailed {
+            // 첫 조회부터 실패하면 스냅샷이 없어 카드가 통째로 사라진다(오프라인 실행 등).
+            // 기능이 조용히 없어지는 것보다 "확인 못 했다"를 보여주는 편이 정직하다.
+            StatusUnavailableCard()
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +44,8 @@ struct MenuContentView: View {
             GlassEffectContainer(spacing: 8) {
                 VStack(spacing: 10) {
                     if monitor.isAuthenticated {
+                        // 장애 중이면 사용량보다 위 — 알림이므로 먼저 눈에 띄어야 한다.
+                        if !statusIsHealthy { statusCard }
                         heroCard
                         if let snapshot = monitor.snapshot {
                             let others = snapshot.quotas.filter { $0.group != .session }
@@ -34,9 +54,12 @@ struct MenuContentView: View {
                             }
                         }
                         localUsageCard
+                        // 정상일 땐 한 줄짜리 주변 정보라 하단으로.
+                        if statusIsHealthy { statusCard }
                         controlsCard
                     } else {
                         authCard
+                        statusCard
                         appControlsCard
                     }
                 }
@@ -158,11 +181,15 @@ struct MenuContentView: View {
         codeInput = ""
     }
 
-    // MARK: - App Controls (로그인 전 화면용: 자동시작/종료만)
+    // MARK: - App Controls (로그인 전 화면용)
 
     private var appControlsCard: some View {
         VStack(spacing: 12) {
             launchAtLoginRow
+            // 상태 폴링은 인증과 무관하게 도므로 **끄는 수단도 이 화면에 있어야 한다.**
+            // 여기 없으면 미로그인 사용자는 외부 호스트 조회를 멈출 방법이 없고,
+            // 인증 화면에서 끈 뒤 로그아웃하면 다시 켤 방법도 없다.
+            serviceStatusRow
             themeRow
             HStack(spacing: 8) {
                 Button {
@@ -783,6 +810,8 @@ struct MenuContentView: View {
 
             launchAtLoginRow
 
+            serviceStatusRow
+
             themeRow
 
             HStack(spacing: 0) {
@@ -828,6 +857,30 @@ struct MenuContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .themedCard(theme, radius: Metrics.cardMedium)
+    }
+
+    /// 상태 폴링 on/off. 끄면 타이머가 멈추고 카드도 사라진다 —
+    /// 앱이 사용자 모르게 외부 호스트를 계속 두드리지 않도록 끌 수단을 준다.
+    private var serviceStatusRow: some View {
+        HStack(spacing: 8) {
+            Label {
+                Text("서비스 상태 확인")
+                    .font(.system(size: 11, weight: .medium))
+            } icon: {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: 10))
+            }
+            .foregroundStyle(theme.secondaryStyle)
+            Spacer()
+            Toggle("", isOn: $showServiceStatus)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+                .onChange(of: showServiceStatus) { _, enabled in
+                    monitor.setStatusEnabled(enabled)
+                }
+        }
+        .help("status.claude.com을 5분마다 조회합니다 (인증 불필요)")
     }
 
     private var themeRow: some View {

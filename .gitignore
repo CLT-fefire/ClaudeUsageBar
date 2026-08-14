@@ -37,3 +37,7 @@ xcuserdata/
 # Claude Code / vibe-coding 설정 (커밋하지 않음)
 CLAUDE.md
 .claude/
+.serena/
+
+# 검증 하네스 렌더 산출물 (재생성: cd Verification && swift run verify)
+Verification/shots/

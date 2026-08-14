@@ -13,6 +13,45 @@ final class UsageMonitor: ObservableObject {
     @Published private(set) var localUsage: LocalUsageReader.Data?
     @Published private(set) var isScanningLocal: Bool = false
 
+    /// status.claude.com 서비스 상태. 인증과 무관하게 폴링한다.
+    @Published private(set) var status: StatusProbe.Snapshot?
+    /// 직전 상태 조회가 실패했는지. 마지막 스냅샷은 유지하되 stale임을 UI에 알린다.
+    @Published private(set) var statusFailed: Bool = false
+    /// 진행 중인 상태 조회. 새 요청이 오면 **이전 것을 취소**한다(last-wins).
+    ///
+    /// 불린 플래그 + 세대 카운터 조합을 두 번 시도했다가 걷어냈다 — 가드 소유권이
+    /// `refreshStatus`의 defer와 `setStatusEnabled` 양쪽으로 쪼개지면서, 폐기된 옛
+    /// 태스크의 defer가 **현재 태스크가 살아있는 채로** 가드를 풀어버렸다. 그러면
+    /// 같은 요청이 둘 동시에 뜨고 응답 순서가 뒤집혀 옛 스냅샷이 새것을 덮어쓴다
+    /// (= 진행 중 장애가 화면에서 사라짐). 취소는 소유권이 Task 하나에 모여 있어
+    /// 이 계열의 경쟁이 구조적으로 성립하지 않는다.
+    private var statusTask: Task<Void, Never>?
+
+    /// 상태 폴링 on/off. 앱이 사용자 모르게 외부 호스트를 계속 두드리지 않도록
+    /// 끌 수단을 준다. 뷰의 @AppStorage와 같은 UserDefaults 키를 공유한다.
+    static let showServiceStatusKey = "showServiceStatus"
+    private var isStatusEnabled: Bool {
+        UserDefaults.standard.object(forKey: Self.showServiceStatusKey) as? Bool ?? true
+    }
+
+    /// 토글이 바뀌었을 때 뷰가 호출. 켜면 즉시 1회 조회 + 타이머 재개, 끄면 정지·초기화.
+    func setStatusEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: Self.showServiceStatusKey)
+        // 진행 중이던 조회를 취소해 뒤늦은 응답이 꺼진 기능을 되살리지 못하게 한다.
+        statusTask?.cancel()
+        statusTask = nil
+
+        guard enabled else {
+            statusTimer?.invalidate()
+            statusTimer = nil
+            status = nil
+            statusFailed = false
+            return
+        }
+        scheduleStatus()
+        refreshStatus()
+    }
+
     /// 차트 on/off 플래그. 뷰의 @AppStorage와 같은 UserDefaults 키를 공유한다.
     static let showLocalChartKey = "showLocalChart"
     private var isLocalChartEnabled: Bool {
@@ -42,6 +81,12 @@ final class UsageMonitor: ObservableObject {
     private let probe = ClaudeUsageProbe()
     private var timer: Timer?
 
+    /// 상태 페이지 폴링은 사용량 주기(기본 60분)와 분리한다. 응답이 2KB대라
+    /// 5분 간격이어도 트래픽이 무시할 수준이고, 장애는 빨리 알아야 의미가 있다.
+    private let statusProbe = StatusProbe()
+    private var statusTimer: Timer?
+    private static let statusInterval: TimeInterval = 5 * 60
+
     // 진행 중인 PKCE 로그인 흐름의 상태(코드 교환 시 필요).
     private var pendingVerifier: String?
     private var pendingState: String?
@@ -50,6 +95,14 @@ final class UsageMonitor: ObservableObject {
         let stored = UserDefaults.standard.object(forKey: Self.intervalKey) as? Int
         self.refreshIntervalSeconds = stored ?? Self.defaultInterval
         self.isAuthenticated = CredentialStore.isSignedIn
+
+        // 상태 폴링은 인증 여부와 무관 — 로그인 화면에서도 장애를 보여준다.
+        // 타이머를 **먼저** 건다: 첫 조회가 타임아웃(10s)까지 늘어져도 주기 폴링 시작이
+        // 그만큼 밀리지 않도록.
+        if isStatusEnabled {
+            scheduleStatus()
+            refreshStatus()
+        }
 
         guard isAuthenticated else { return }
         Task { @MainActor in
@@ -93,6 +146,35 @@ final class UsageMonitor: ObservableObject {
     func manualRefresh() {
         Task { @MainActor in
             await refresh()
+        }
+        refreshStatus()
+    }
+
+    /// status.claude.com 조회를 시작한다. 실패해도 사용량 UI를 방해하지 않도록
+    /// 에러를 삼키고 마지막 스냅샷을 유지한 채 `statusFailed` 플래그만 세운다.
+    ///
+    /// **last-wins**: 진행 중이던 조회를 취소하고 새로 띄운다. 수동 새로고침(⌘R)과
+    /// 5분 타이머가 겹쳐도 살아남는 요청이 하나뿐이라, 먼저 출발한 느린 응답이
+    /// 나중에 도착해 새 스냅샷을 옛것으로 덮어쓰는 경로가 생기지 않는다.
+    func refreshStatus() {
+        statusTask?.cancel()
+        guard isStatusEnabled else {
+            statusTask = nil
+            return
+        }
+        statusTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let snapshot = try await self.statusProbe.probe()
+                // URLSession은 취소 시 CancellationError가 아니라 URLError(.cancelled)를
+                // 던지므로, 성공 경로에서도 취소 여부를 직접 본다.
+                guard !Task.isCancelled, self.isStatusEnabled else { return }
+                self.status = snapshot
+                self.statusFailed = false
+            } catch {
+                guard !Task.isCancelled, self.isStatusEnabled else { return }
+                self.statusFailed = true
+            }
         }
     }
 
@@ -181,6 +263,17 @@ final class UsageMonitor: ObservableObject {
         isAuthenticated = false
         snapshot = nil
         lastError = nil
+    }
+
+    /// 고정 주기 반복 타이머. 사용량 타이머와 달리 `isAuthenticated` 에 걸리지 않고
+    /// 로그아웃/재로그인에도 살아있어야 하므로 `handleSessionExpired()` 에서 건드리지 않는다.
+    private func scheduleStatus() {
+        statusTimer?.invalidate()
+        statusTimer = Timer.scheduledTimer(withTimeInterval: Self.statusInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshStatus()
+            }
+        }
     }
 
     private func scheduleNext() {

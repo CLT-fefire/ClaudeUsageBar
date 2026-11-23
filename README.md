@@ -212,7 +212,7 @@ ClaudeUsageBar/
 
 ## 버전 / 로드맵
 
-최신: **v0.11.0** (2026-08-11) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
+최신: **v0.13.0** (2026-11-23) — [릴리스 노트](https://github.com/CLT-fefire/ClaudeUsageBar/releases/latest)
 
 - v0.1.0 — 메뉴바 % 표시 + 4개 quota 진행률
 - v0.2.0 — Liquid Glass 디자인 + 갱신 주기 설정
@@ -227,6 +227,8 @@ ClaudeUsageBar/
 - v0.10.1 — 테마 폴리시 (전 테마 다크 고정, 홀로 sun-stripe, 터미널 green 텍스트 전면, HUD 스캔라인, 테마별 텍스트 계층색)
 - v0.10.2 — 터미널 블록 게이지가 가용 폭을 꽉 채우도록 수정 (동적 셀 수)
 - v0.11.0 — **로컬 사용량 집계 정정** (content block 중복 계상 제거 · 서브에이전트 로그 포함 · 출력 토큰만 세던 것을 입력+출력+캐시 총 토큰으로 전환)
+- v0.12.0 — Claude 서비스 상태 페이지 연동 (상태 카드 · 장애 시 메뉴바 경고)
+- v0.13.0 — **로컬 금액 단가 정정** (모델 세대별 단가·캐시 읽기 배율, 캐시 TTL·fast mode 반영, 이어가기/분기 세션의 중복 집계 제거) · 지금 적용 중인 한도 표시(팝오버·메뉴바) · 모델별 한도의 주간 대비 비중 · 추가 크레딧 요약
 
 ## 라이선스
 

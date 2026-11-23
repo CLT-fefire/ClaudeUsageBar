@@ -119,8 +119,8 @@ final class UsageMonitor: ObservableObject {
     var statusBarText: String {
         if !isAuthenticated { return "로그인" }
         if isProbing && snapshot == nil { return "…" }
-        guard let session = snapshot?.session else { return "—" }
-        return "\(session.percentUsed)%"
+        guard let snapshot, let session = snapshot.session else { return "—" }
+        return MenuBarLabel.text(session: session, active: snapshot.activeQuota)
     }
 
     func refresh() async {

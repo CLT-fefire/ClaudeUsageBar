@@ -10,6 +10,26 @@ struct MenuBarLabel: View {
     let text: String
     let hasOutage: Bool
 
+    /// 세션 %를 기본으로 하되, 서버가 **다른 한도가 걸려 있다**고 알려주면 그 값을
+    /// 덧붙인다("20% · Fable 59%"). 세션만 보면 여유 있어 보여도 주간·모델별 한도가
+    /// 먼저 닿는 경우를 메뉴바에서 놓치지 않기 위함이다.
+    /// (`UsageMonitor`는 하네스에 링크되지 않아 문구 조립을 여기에 둔다.)
+    nonisolated static func text(session: ClaudeUsageProbe.Quota,
+                                 active: ClaudeUsageProbe.Quota?) -> String {
+        let base = "\(session.percentUsed)%"
+        guard let active, active.id != session.id else { return base }
+        // 표시명이 없는 모델별 한도를 "주간"으로 뭉개면 주간 전체 한도처럼 읽힌다 —
+        // 팝오버 행 라벨(`shortLabel`)과 같은 말을 쓴다.
+        let label: String? = active.scopeLabel ?? {
+            switch active.kind {
+            case "weekly_all": return "주간"
+            case "weekly_scoped": return "주간 모델"
+            default: return nil
+            }
+        }()
+        return "\(base) · \(label.map { "\($0) " } ?? "")\(active.percentUsed)%"
+    }
+
     var body: some View {
         // ⚠️ HStack 필수. stack 없이 Image+Text를 나란히 두면 TupleView가 되어
         // 암묵 **세로** 스택으로 렌더된다(실측 28×31pt vs HStack 47×16pt).

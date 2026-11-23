@@ -49,8 +49,8 @@ struct MenuContentView: View {
                         heroCard
                         if let snapshot = monitor.snapshot {
                             let others = snapshot.quotas.filter { $0.group != .session }
-                            if !others.isEmpty {
-                                secondaryCard(others)
+                            if !others.isEmpty || snapshot.credits != nil {
+                                secondaryCard(others, credits: snapshot.credits)
                             }
                         }
                         localUsageCard
@@ -457,7 +457,10 @@ struct MenuContentView: View {
 
     // MARK: - Secondary Quotas Card
 
-    private func secondaryCard(_ quotas: [ClaudeUsageProbe.Quota]) -> some View {
+    private func secondaryCard(
+        _ quotas: [ClaudeUsageProbe.Quota],
+        credits: ClaudeUsageProbe.Credits?
+    ) -> some View {
         VStack(spacing: 10) {
             ForEach(quotas) { quota in
                 secondaryRow(quota)
@@ -472,6 +475,10 @@ struct MenuContentView: View {
                 }
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(theme.tertiaryStyle)
+            }
+            if let credits {
+                if !quotas.isEmpty { Divider().opacity(Metrics.dividerOpacity) }
+                creditsRow(credits)
             }
         }
         .padding(.horizontal, 14)
@@ -493,21 +500,91 @@ struct MenuContentView: View {
     }
 
     private func secondaryRow(_ q: ClaudeUsageProbe.Quota) -> some View {
-        HStack(spacing: 10) {
-            Text(shortLabel(q))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(theme.secondaryStyle)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 10) {
+                // 적용 중인 한도는 라벨을 한 단계 진하게 + 점으로 구분한다. 색만으로
+                // 구분하지 않는 이유: 막대 색은 이미 소진율(severity)을 뜻한다.
+                HStack(spacing: 4) {
+                    if q.isActive {
+                        Circle().fill(barColor(q)).frame(width: 5, height: 5)
+                    }
+                    Text(shortLabel(q))
+                        .font(.system(size: 11, weight: q.isActive ? .semibold : .medium))
+                        .foregroundStyle(q.isActive ? theme.primaryStyle : theme.secondaryStyle)
+                        .lineLimit(1)
+                }
                 .frame(width: 80, alignment: .leading)
-                .lineLimit(1)
+                .help(q.isActive ? "지금 적용 중인 한도" : "")
 
-            themedQuotaBar(theme, percent: q.percentUsed, color: barColor(q))
+                themedQuotaBar(theme, percent: q.percentUsed, color: barColor(q))
 
-            Text("\(q.percentUsed)%")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(barColor(q))
-                .frame(width: 36, alignment: .trailing)
-                .monospacedDigit()
+                Text("\(q.percentUsed)%")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(barColor(q))
+                    .frame(width: 36, alignment: .trailing)
+                    .monospacedDigit()
+            }
+            if let detail = quotaDetail(q) {
+                Text(detail)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(theme.tertiaryStyle)
+                    .lineLimit(1)
+            }
         }
+    }
+
+    /// 행 아래 보조 설명. 적용 중 여부와 주간 대비 비중을 한 줄로.
+    private func quotaDetail(_ q: ClaudeUsageProbe.Quota) -> String? {
+        var parts: [String] = []
+        if q.isActive { parts.append("적용 중") }
+        if let share = q.weeklyShare {
+            parts.append("주간 전체의 \(share.allowancePercent)% 할당 · \(share.usedPercent)%p 사용")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// 추가 사용량(크레딧) 한 줄. 플랜 한도를 넘긴 뒤의 지출은 quota %에 안 잡히므로
+    /// 별도로 보여준다. 서버가 표시할 값을 준 계정에서만 나타난다(파서에서 nil 판정).
+    private func creditsRow(_ c: ClaudeUsageProbe.Credits) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: c.limitReached ? "exclamationmark.circle.fill" : "creditcard")
+                .font(.system(size: 9))
+            Text("추가 크레딧")
+            if !c.isEnabled {
+                Text("· 꺼짐")
+            }
+            Spacer()
+            Text(creditsValueText(c))
+                .foregroundStyle(c.limitReached
+                    ? theme.palette.critical
+                    : theme.severityColor(c.severity, percent: c.percent ?? 0))
+        }
+        .font(.system(size: 10, design: .monospaced))
+        .foregroundStyle(theme.tertiaryStyle)
+    }
+
+    private func creditsValueText(_ c: ClaudeUsageProbe.Credits) -> String {
+        var parts: [String] = []
+        if let used = c.used, let limit = c.limit {
+            parts.append("\(formatMoney(used)) / \(formatMoney(limit))")
+        } else if let used = c.used {
+            parts.append(formatMoney(used))
+        } else if let percent = c.percent {
+            parts.append("\(percent)%")
+        }
+        if c.limitReached { parts.append("한도 도달") }
+        return parts.isEmpty ? "사용 중" : parts.joined(separator: " · ")
+    }
+
+    /// `NumberFormatter`를 쓰지 않는 이유: 이 함수는 hover로 body가 재평가될 때마다
+    /// 불리는 경로에 있어(차트 `onContinuousHover` → `hoveredLabel` 갱신) 포매터를
+    /// 매번 생성하면 로케일·통화 데이터 로딩이 그 빈도로 따라온다. FormatStyle은
+    /// 값 타입이라 할당 비용이 없다. 로케일을 `en_US`로 고정하는 것은 같은 팝오버의
+    /// `compactCost`(`$` 하드코딩)와 표기를 맞추기 위한 것이다("US$12.34" 혼재 방지).
+    private func formatMoney(_ money: ClaudeUsageProbe.Money) -> String {
+        money.amount.formatted(
+            .currency(code: money.currencyCode).locale(Locale(identifier: "en_US"))
+        )
     }
 
     // MARK: - Local Usage Card (로컬 로그 기반 · 공식 %와 별개)
@@ -677,8 +754,11 @@ struct MenuContentView: View {
             Text("출력 \(compactTokens(b.output)) · 캐시읽기 \(compactTokens(b.cached))")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(theme.secondaryStyle)
-            Text("~\(compactCost(b.cost))")
+            Text("API 환산 ~\(compactCost(b.cost.total))")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(theme.secondaryStyle)
+            Text("입출력 \(compactCost(b.cost.inputOutput)) · 캐시쓰기 \(compactCost(b.cost.cacheWrite)) · 캐시읽기 \(compactCost(b.cost.cacheRead))")
+                .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(theme.tertiaryStyle)
         }
         .fixedSize()
@@ -697,7 +777,7 @@ struct MenuContentView: View {
 
     private func localSummary(_ buckets: [LocalChartBucket]) -> some View {
         let totalOut = buckets.reduce(0) { $0 + $1.total }
-        let totalCost = buckets.reduce(0.0) { $0 + $1.cost }
+        let totalCost = buckets.reduce(0.0) { $0 + $1.cost.total }
         let autoOut = buckets.reduce(0) { $0 + $1.automation }
         let autoPct = totalOut > 0 ? Int((Double(autoOut) / Double(totalOut) * 100).rounded()) : 0
         return HStack(spacing: 4) {
@@ -709,8 +789,9 @@ struct MenuContentView: View {
                 .foregroundStyle(theme.primaryStyle)
             Text("·")
                 .foregroundStyle(theme.tertiaryStyle)
-            Text("~\(compactCost(totalCost))")
+            Text("API 환산 ~\(compactCost(totalCost))")
                 .foregroundStyle(theme.primaryStyle)
+                .help("구독 요금이 아니라, 같은 사용량을 API 공개 단가로 계산했을 때의 금액입니다.")
             Spacer()
             Text("자동화 \(autoPct)%")
                 .foregroundStyle(theme.palette.chartAutomation)
@@ -719,10 +800,12 @@ struct MenuContentView: View {
     }
 
     private var localUsageFootnote: some View {
-        HStack(spacing: 4) {
+        // 한 줄에 다 안 들어간다(실측: 뒤쪽 금액 설명이 잘렸다). 두 줄로 나눠 둘 다 보이게.
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
             Image(systemName: "info.circle")
                 .font(.system(size: 8))
-            Text("~/.claude 로그 기준 · 입력+출력+캐시 합산 · 공식 한도(%)와 별개 · 비용은 추정")
+            Text("~/.claude 로그 기준 · 캐시 포함 합산 · 한도(%)와 별개\n금액은 구독료가 아닌 API 단가 환산(추정)")
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
         }
         .font(.system(size: 9))
@@ -744,7 +827,10 @@ struct MenuContentView: View {
             }
         }
 
-        struct Roll { var interactive = 0, automation = 0, output = 0, cached = 0; var cost = 0.0 }
+        struct Roll {
+            var interactive = 0, automation = 0, output = 0, cached = 0
+            var cost = LocalUsageReader.CostParts()
+        }
         var map: [Date: Roll] = [:]
         for b in data.days {
             let s = start(b.day)
@@ -753,7 +839,7 @@ struct MenuContentView: View {
             v.automation += b.automation.total
             v.output += b.totalOutput
             v.cached += b.interactive.cacheRead + b.automation.cacheRead
-            v.cost += b.totalCost
+            v.cost += b.costParts
             map[s] = v
         }
 
@@ -780,6 +866,9 @@ struct MenuContentView: View {
 
     private func compactTokens(_ n: Int) -> String {
         let d = Double(n)
+        // 캐시 읽기까지 합산하면 하루에도 10억을 넘는다 — "2576.1M"은 읽히지 않는다.
+        if d >= 1_000_000_000 { return String(format: "%.2fB", d / 1_000_000_000) }
+        if d >= 10_000_000 { return String(format: "%.0fM", d / 1_000_000) }
         if d >= 1_000_000 { return String(format: "%.1fM", d / 1_000_000) }
         if d >= 1_000 { return String(format: "%.0fK", d / 1_000) }
         return "\(n)"
@@ -1033,6 +1122,6 @@ struct LocalChartBucket: Identifiable {
     let automation: Int
     let output: Int
     let cached: Int
-    let cost: Double
+    let cost: LocalUsageReader.CostParts
     var total: Int { interactive + automation }
 }
